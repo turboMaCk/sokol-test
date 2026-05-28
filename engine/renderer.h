@@ -60,7 +60,8 @@ void renderer_init(RenderBatch2d* batcher, sg_shader shader) {
     sg_buffer_desc vbuf_desc = {
         .size = sizeof(Vertex) * MAX_VERTICES,
         .usage = {
-            .dynamic_update = true
+            .dynamic_update = true,
+            .vertex_buffer = true
         }
     };
 
@@ -115,15 +116,22 @@ void renderer_begin(RenderBatch2d* batcher) {
 void renderer_flush(RenderBatch2d* batcher) {
     if (batcher->vertex_count == 0) return;
 
-    // upload CPU vertex cache to the dynamic GPU buffer
-    sg_update_buffer(batcher->vbuf, &(sg_range) {
+    // append vertices to the buffer tape and retrieve the current byte offset
+    int offset = sg_append_buffer(batcher->vbuf, &(sg_range) {
         .ptr = batcher->vertex_buffer,
         .size = sizeof(Vertex) * batcher->vertex_count
     });
 
-    // setup bindings
+    // handle potential frame allocation overflows safely
+    if (sg_query_buffer_overflow(batcher->vbuf)) {
+        batcher->vertex_count = 0;
+        return;
+    }
+
+    // bind the buffer and apply the dynamic offset
     sg_bindings bind = {
         .vertex_buffers[0] = batcher->vbuf,
+        .vertex_buffer_offsets[0] = offset, // Tracks where this batch begins
         .index_buffer = batcher->ibuf
     };
 
@@ -133,7 +141,7 @@ void renderer_flush(RenderBatch2d* batcher) {
 
     // each quad has 6 indices.
     // vertex_count / 4 = numer of quads/sprites.
-    int num_indices = batcher->vertex_count / 4 * 6;
+    int num_indices = (batcher->vertex_count / 4) * 6;
     sg_draw(0, num_indices, 1);
 
     // reset count for the next batch
@@ -141,9 +149,9 @@ void renderer_flush(RenderBatch2d* batcher) {
 }
 
 void renderer_push_sprite(RenderBatch2d* batcher, Sprite* sprite) {
-    // if (batcher->vertex_count + 4 > MAX_VERTICES) {
-    //     renderer_flush(batcher);
-    // }
+    if (batcher->vertex_count + 4 > MAX_VERTICES) {
+        renderer_flush(batcher);
+    }
 
     int v_idx = batcher->vertex_count;
     Rgba col = sprite->color;
