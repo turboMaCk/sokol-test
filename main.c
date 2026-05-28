@@ -1,3 +1,6 @@
+#define ENGINE_IMPL
+#include "engine/renderer.h"
+
 #define SOKOL_IMPL
 #define SOKOL_GLCORE33
 
@@ -6,13 +9,8 @@
 #include "sokol_glue.h"
 #include "sokol_log.h"
 
-typedef struct {
-    float position[3];
-    float color[4];
-} Vertex;
 
-static sg_buffer vbuf;
-static sg_pipeline pip;
+static RenderBatch2d renderer;
 
 void init(void) {
     sg_desc desc = {
@@ -21,19 +19,7 @@ void init(void) {
     };
     sg_setup(&desc);
 
-    Vertex vertices[] = {
-        { { +0.0f, +0.5f, 0.0f }, { 1.0f, 0.0f, 0.0f, 1.0f } },
-        { { -0.5f, -0.5f, 0.0f }, { 0.0f, 1.0f, 0.0f, 1.0f } },
-        { { +0.5f, -0.5f, 0.0f }, { 0.0f, 0.0f, 1.0f, 1.0f } }
-    };
-
-    sg_buffer_desc buf_desc = {
-        .data = SG_RANGE(vertices)
-    };
-    vbuf = sg_make_buffer(&buf_desc);
-
-    // Fixed layout for modern sg_shader_desc structure
-    sg_shader_desc shd_desc = {
+    sg_shader_desc shader_desc = {
         .vertex_func.source =
             "#version 330 core\n"
             "layout(location=0) in vec3 a_position;\n"
@@ -48,52 +34,51 @@ void init(void) {
             "in vec4 v_color;\n"
             "out vec4 f_color;\n"
             "void main() {\n"
-            "  f_color = v_color;\n"
+            "  f_color = v_color;\n" // Use color passed from vertices
             "}"
     };
-    sg_shader shd = sg_make_shader(&shd_desc);
+    sg_shader shader = sg_make_shader(&shader_desc);
 
-    sg_pipeline_desc pip_desc = {
-        .shader = shd,
-        .layout = {
-            .attrs[0].format = SG_VERTEXFORMAT_FLOAT3,
-            .attrs[1].format = SG_VERTEXFORMAT_FLOAT4
-        }
-    };
-    pip = sg_make_pipeline(&pip_desc);
+    renderer_init(&renderer, shader);
 }
 
 void frame(void) {
-    // Fixed pass initialization using proper sglue_swapchain() call
-    sg_pass pass = {
-        .action = {
-            .colors[0] = {
-                .load_action = SG_LOADACTION_CLEAR,
-                .clear_value = { 0.5f, 0.5f, 0.5f, 1.0f }
-            }
-        },
+    sg_pass_action pass_action = {
+        .colors[0] = {
+            .load_action = SG_LOADACTION_CLEAR,
+            .clear_value = { 0.1f, 0.1f, 0.1f, 1.0f }
+        }
+    };
+
+    sg_begin_pass(&(sg_pass){
+        .action = pass_action,
         .swapchain = sglue_swapchain()
-    };
-    sg_begin_pass(&pass);
+    });
 
-    sg_bindings bind = {
-        .vertex_buffers[0] = vbuf
-    };
-
-    sg_apply_pipeline(pip);
-    sg_apply_bindings(&bind);
-    sg_draw(0, 3, 1);
+    renderer_begin(&renderer);
+    {
+        Sprite sprite = {
+            .position = {0.0f, 0.0f},
+            .size = {0.5f, 0.5f},
+            .rotation = 0.0f,
+            .color = {1.0f, 0.0f, 0.0f, 1.0f} // Red color
+        };
+        renderer_push_sprite(&renderer, &sprite);
+    }
+    renderer_end(&renderer);
 
     sg_end_pass();
     sg_commit();
 }
 
 void cleanup(void) {
+    renderer_destroy(&renderer);
     sg_shutdown();
 }
 
 sapp_desc sokol_main(int argc, char **argv) {
-    (void)argc; (void)argv;
+    (void)argc; (void)argv
+    ;
     sapp_desc desc = {
         .init_cb = init,
         .frame_cb = frame,
