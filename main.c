@@ -93,12 +93,31 @@ void frame(void) {
         .color = {0.0f, 1.0f, 0.0f, 1.0f} // Green color
     };
 
+    float target_aspect = game_target.width / game_target.height;
+    float screen_aspect = screen_target.width / screen_target.height;
+
+    float draw_w;
+    float draw_h;
+
+    if (screen_aspect > target_aspect) {
+      // pillarbox
+      draw_h = screen_target.height;
+      draw_w = draw_h * target_aspect;
+    } else {
+      // letterbox
+      draw_w = screen_target.width;
+      draw_h = draw_w / target_aspect;
+    }
+
+    float x = (screen_target.width - draw_w) * 0.5f;
+    float y = (screen_target.height - draw_h) * 0.5f;
+
     Sprite editor_pane_rect = {
-        .position = {100.0f, 80.0f},
-        .size = { GAME_TARGET_WIDTH, GAME_TARGET_HEIGHT },
-        .rotation = rotation_from_deg(0.0f),
-        .color = {1.0f, 1.0f, 1.0f, 1.0f}, // Pure white so texture retains its original colors
-        .texture_view = game_target.color_texture_view // Sample the offscreen canvas texture!
+        .position = { x + draw_w * 0.5f, y + draw_h * 0.5f },
+        .size = { draw_w, draw_h },
+        .rotation = ROTATION_NONE,
+        .color = {1,1,1,1},
+        .texture_view = game_target.color_texture_view
     };
 
     // -------------------------------------------------------------
