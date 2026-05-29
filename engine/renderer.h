@@ -11,6 +11,11 @@
 typedef struct { float x, y; } Vec2;
 typedef struct { float r, g, b, a; } Rgba;
 
+Vec2 rotation_from_rad(float radians);
+Vec2 rotation_from_deg(float degrees);
+
+#define ROTATION_NONE ((Vec2){ 1.0f, 0.0f })
+
 typedef struct {
     float position[3];
     float color[4];
@@ -31,7 +36,7 @@ typedef struct {
 typedef struct {
     Vec2 position;
     Vec2 size;
-    float rotation; // In radians
+    Vec2 rotation; // Stores { cos(angle), sin(angle) }
     Rgba color;
     // uint32_t texture_id; // Ready for later
 } Sprite;
@@ -52,6 +57,21 @@ void renderer_destroy(RenderBatch2d* batcher);
 
 #include <string.h>
 #include <math.h>
+#include "sokol_app.h"
+
+Vec2 rotation_from_rad(float radians) {
+    Vec2 rot;
+    rot.x = cosf(radians);
+    rot.y = sinf(radians);
+    return rot;
+}
+
+Vec2 rotation_from_deg(float degrees) {
+    // Convert degrees to radians: (deg * PI / 180)
+    // Using 0.0174532925f (PI / 180) avoids a runtime division
+    float radians = degrees * 0.0174532925f;
+    return rotation_from_rad(radians);
+}
 
 void renderer_init(RenderBatch2d* batcher, sg_shader shader) {
     memset(batcher, 0, sizeof(RenderBatch2d));
@@ -139,6 +159,9 @@ void renderer_flush(RenderBatch2d* batcher) {
     sg_apply_pipeline(batcher->pip);
     sg_apply_bindings(&bind);
 
+    float aspect_data[4] = { sapp_width() / (float)sapp_height(), 0.0f, 0.0f, 0.0f };
+    sg_apply_uniforms(0, &SG_RANGE(aspect_data));
+
     // each quad has 6 indices.
     // vertex_count / 4 = numer of quads/sprites.
     int num_indices = (batcher->vertex_count / 4) * 6;
@@ -166,11 +189,8 @@ void renderer_push_sprite(RenderBatch2d* batcher, Sprite* sprite) {
         {  half_w, -half_h }  // Top-Right
     };
 
-    // TODO: maybe we should cache results of these
-    // calls so we can reuse already calculated ones across
-    // all sprites
-    float cos_a = cosf(sprite->rotation);
-    float sin_a = sinf(sprite->rotation);
+    float cos_a = sprite->rotation.x;
+    float sin_a = sprite->rotation.y;
 
     // Rotate + Translate
     for (int i = 0; i < 4; i++) {
@@ -201,6 +221,9 @@ void renderer_end(RenderBatch2d* batcher) {
 }
 
 void renderer_destroy(RenderBatch2d* batcher) {
+    // extra defensive code in case this is called after sokol is destoryed
+    if (!sg_isvalid()) return;
+
     // Safely release the GPU resources
     sg_destroy_buffer(batcher->vbuf);
     sg_destroy_buffer(batcher->ibuf);

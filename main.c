@@ -20,13 +20,24 @@ void init(void) {
     sg_setup(&desc);
 
     sg_shader_desc shader_desc = {
+        .uniform_blocks[0] = {
+            .stage = SG_SHADERSTAGE_VERTEX,
+            .size = sizeof(float) * 4,
+            // The GL backend demands this inner array configuration explicitly:
+            .glsl_uniforms[0] = {
+                .glsl_name = "u_aspect",
+                .type = SG_UNIFORMTYPE_FLOAT4
+            }
+        },
         .vertex_func.source =
             "#version 330 core\n"
             "layout(location=0) in vec3 a_position;\n"
             "layout(location=1) in vec4 a_color;\n"
+            "uniform vec4 u_aspect;\n"
             "out vec4 v_color;\n"
             "void main() {\n"
-            "  gl_Position = vec4(a_position, 1.0);\n"
+            // Access the actual scalar float value out of the vector's X component (.x)
+            "  gl_Position = vec4(a_position.x / u_aspect.x, a_position.y, a_position.z, 1.0);\n"
             "  v_color = a_color;\n"
             "}",
         .fragment_func.source =
@@ -34,7 +45,7 @@ void init(void) {
             "in vec4 v_color;\n"
             "out vec4 f_color;\n"
             "void main() {\n"
-            "  f_color = v_color;\n" // Use color passed from vertices
+            "  f_color = v_color;\n"
             "}"
     };
     sg_shader shader = sg_make_shader(&shader_desc);
@@ -60,7 +71,7 @@ void frame(void) {
         Sprite sprite = {
             .position = {0.0f, 0.0f},
             .size = {0.5f, 0.5f},
-            .rotation = 0.0f,
+            .rotation = rotation_from_deg(45.0f),
             .color = {1.0f, 0.0f, 0.0f, 1.0f} // Red color
         };
         renderer_push_sprite(&renderer, &sprite);
