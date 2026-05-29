@@ -9,16 +9,33 @@
 
 // TODO: probably move to math module
 typedef struct { float x, y; } Vec2;
-typedef struct { float r, g, b, a; } Rgba;
+typedef struct { float m[16]; } Mat4;
 
 Vec2 rotation_from_rad(float radians);
 Vec2 rotation_from_deg(float degrees);
+Mat4 mat4_ortho(float left, float right, float bottom, float top);
 
 #define ROTATION_NONE ((Vec2){ 1.0f, 0.0f })
 
 typedef struct {
+    sg_image color_img;
+    sg_image depth_img;
+    sg_view color_view;
+    sg_view depth_view;
+    sg_view color_texture_view;
+    float width;
+    float height;
+    bool is_swapchain;
+} RenderTarget;
+
+RenderTarget render_target_create_offscreen(float width, float height);
+RenderTarget render_target_create_swapchain(void);
+void render_target_destroy(RenderTarget *target);
+
+typedef struct {
     float position[3];
     float color[4];
+    Vec2 uv;
 } Vertex;
 
 typedef struct {
@@ -29,24 +46,31 @@ typedef struct {
     Vertex vertex_buffer[MAX_VERTICES];
     int vertex_count;
 
-    // Track current state to know when to flush
-    uint32_t current_texture_id;
+    // current projection, applied during renderer_begin()
+    Mat4 projection;
+
+    sg_image white_image;
+    sg_view white_tex_view;
+    sg_view current_texture_view;
+
+    // The persistent sampler handle initialized once during setup
+    sg_sampler default_sampler;
 } RenderBatch2d;
 
 typedef struct {
     Vec2 position;
     Vec2 size;
     Vec2 rotation; // Stores { cos(angle), sin(angle) }
-    Rgba color;
-    // uint32_t texture_id; // Ready for later
+    sg_color color;
+    sg_view texture_view;
 } Sprite;
 
-void renderer_init(RenderBatch2d* batcher, sg_shader shader);
-void renderer_begin(RenderBatch2d* batcher);
-void renderer_flush(RenderBatch2d* batcher);
-void renderer_end(RenderBatch2d* batcher);
-void renderer_push_sprite(RenderBatch2d* batcher, Sprite* sprite);
-void renderer_destroy(RenderBatch2d* batcher);
+void renderer_init(RenderBatch2d* renderer, sg_shader shader);
+void renderer_begin(RenderBatch2d* renderer, Mat4 projection);
+void renderer_flush(RenderBatch2d* renderer);
+void renderer_end(RenderBatch2d* renderer);
+void renderer_push_sprite(RenderBatch2d* renderer, Sprite* sprite);
+void renderer_destroy(RenderBatch2d* renderer);
 
 #endif // RENDERER_H
 
@@ -58,6 +82,8 @@ void renderer_destroy(RenderBatch2d* batcher);
 #include <string.h>
 #include <math.h>
 #include "sokol_app.h"
+
+// Math
 
 Vec2 rotation_from_rad(float radians) {
     Vec2 rot;
@@ -73,8 +99,126 @@ Vec2 rotation_from_deg(float degrees) {
     return rotation_from_rad(radians);
 }
 
-void renderer_init(RenderBatch2d* batcher, sg_shader shader) {
-    memset(batcher, 0, sizeof(RenderBatch2d));
+Mat4 mat4_ortho(float left, float right, float bottom, float top) {
+    Mat4 result = {0};
+
+    // Near/Far are mapped tightly to [-1.0, 1.0] for 2D depth layers
+    float near_val = -1.0f;
+    float far_val  =  1.0f;
+
+    result.m[0]  = 2.0f / (right - left);
+    result.m[5]  = 2.0f / (top - bottom);
+    result.m[10] = -2.0f / (far_val - near_val);
+    result.m[12] = -(right + left) / (right - left);
+    result.m[13] = -(top + bottom) / (top - bottom);
+    result.m[14] = -(far_val + near_val) / (far_val - near_val);
+    result.m[15] = 1.0f;
+
+    return result;
+}
+
+// RenderTarget
+
+// Implementation functions
+RenderTarget render_target_create_offscreen(float width, float height) {
+    RenderTarget target = {
+        .width = width,
+        .height = height,
+        .is_swapchain = false
+    };
+
+    target.color_img = sg_make_image(&(sg_image_desc){
+        .width = (int)width,
+        .height = (int)height,
+        .pixel_format = SG_PIXELFORMAT_RGBA8,
+        .sample_count = 1,
+        .usage = {
+            .color_attachment = true
+        },
+        .label = "offscreen-color-target"
+    });
+
+    target.depth_img = sg_make_image(&(sg_image_desc){
+        .width = (int)width,
+        .height = (int)height,
+        .pixel_format = SG_PIXELFORMAT_DEPTH_STENCIL,
+        .sample_count = 1,
+        .usage = {
+            .depth_stencil_attachment = true
+        },
+        .label = "offscreen-depth-target"
+    });
+
+    target.color_view = sg_make_view(&(sg_view_desc){
+        .color_attachment.image = target.color_img,
+        .label = "offscreen-color-view"
+    });
+
+    target.depth_view = sg_make_view(&(sg_view_desc){
+        .depth_stencil_attachment.image = target.depth_img,
+        .label = "offscreen-depth-view"
+    });
+
+    target.color_texture_view = sg_make_view(&(sg_view_desc){
+        .texture.image = target.color_img,
+        .label = "offscreen-color-texture-view"
+    });
+
+    return target;
+}
+
+RenderTarget render_target_create_swapchain(void) {
+    return (RenderTarget){
+        .width = 0.0f,  // Will be overwritten with actual window width on frame 1
+        .height = 0.0f, // Will be overwritten with actual window height on frame 1
+        .is_swapchain = true
+    };
+}
+
+void renderer_begin_target_pass(RenderTarget* target, sg_color clear_color) {
+    sg_pass_action action = {
+        .colors[0] = {
+            .load_action = SG_LOADACTION_CLEAR,
+            .clear_value = clear_color
+        }
+    };
+
+    sg_pass pass = { .action = action };
+
+    if (target->is_swapchain) {
+        extern sg_swapchain sglue_swapchain(void);
+
+        // Keep our internal engine tracking dimensions updated in case of resize
+        target->width = (float)sapp_width();
+        target->height = (float)sapp_height();
+
+        // Let the glue library completely manage the swapchain population
+        pass.swapchain = sglue_swapchain();
+    } else {
+        // Direct view assignments for offscreen rendering
+        pass.attachments.colors[0] = target->color_view;
+        pass.attachments.depth_stencil = target->depth_view;
+    }
+
+    sg_begin_pass(&pass);
+}
+
+void render_target_destroy(RenderTarget *target) {
+    if (target->is_swapchain) return;
+    sg_destroy_image(target->color_img);
+    sg_destroy_image(target->depth_img);
+    sg_destroy_view(target->color_view);
+    sg_destroy_view(target->depth_view);
+    sg_destroy_view(target->color_texture_view);
+    target->width = 0;
+    target->height = 0;
+    target->is_swapchain = true;
+}
+
+// Renderer
+
+void renderer_init(RenderBatch2d* renderer, sg_shader shader) {
+    memset(renderer, 0, sizeof(RenderBatch2d));
 
     // vertex buffer
     sg_buffer_desc vbuf_desc = {
@@ -86,7 +230,7 @@ void renderer_init(RenderBatch2d* batcher, sg_shader shader) {
     };
 
     sg_buffer vbuf = sg_make_buffer(&vbuf_desc);
-    batcher->vbuf = vbuf;
+    renderer->vbuf = vbuf;
 
     // index buffer
     uint16_t indices[MAX_SPRITES * 6];
@@ -112,72 +256,103 @@ void renderer_init(RenderBatch2d* batcher, sg_shader shader) {
         .data = SG_RANGE(indices)
     };
     sg_buffer ibuf = sg_make_buffer(&ibuf_desc);
-    batcher->ibuf = ibuf;
+    renderer->ibuf = ibuf;
 
     // pipeline
     sg_pipeline_desc pip_desc = {
-        .shader = shader,
-        .layout = {
-            .attrs[0].format = SG_VERTEXFORMAT_FLOAT3, // position
-            .attrs[1].format = SG_VERTEXFORMAT_FLOAT4  // color
-        },
-        .index_type = SG_INDEXTYPE_UINT16
+        // location 0: pos
+        .layout.attrs[0] = { .format = SG_VERTEXFORMAT_FLOAT3 },
+        // location 1: color
+        .layout.attrs[1] = { .format = SG_VERTEXFORMAT_FLOAT4 },
+        // location 2: UV
+        .layout.attrs[2] = { .format = SG_VERTEXFORMAT_FLOAT2 },
+        .index_type = SG_INDEXTYPE_UINT16,
+        .shader = shader
     };
 
-    batcher->pip = sg_make_pipeline(&pip_desc);
+    renderer->pip = sg_make_pipeline(&pip_desc);
+
+    // default white texture (solid colors)
+    static uint32_t white_pixel = 0xFFFFFFFF; // RGBA8 white (declared static so memory stays persistent during setup)
+    renderer->white_image = sg_make_image(&(sg_image_desc){
+        .width = 1,
+        .height = 1,
+        .pixel_format = SG_PIXELFORMAT_RGBA8,
+        .sample_count = 1,
+        .data.mip_levels[0] = SG_RANGE(white_pixel)
+    });
+
+    renderer->white_tex_view = sg_make_view(&(sg_view_desc){
+        .texture.image = renderer->white_image,
+        .label = "white-texture-view"
+    });
+
+    renderer->default_sampler = sg_make_sampler(&(sg_sampler_desc){ .label = "default-sampler" });
 }
 
-void renderer_begin(RenderBatch2d* batcher) {
-    batcher->vertex_count = 0;
-    batcher->current_texture_id = 0; // 0 means no texture bound yet
+void renderer_begin(RenderBatch2d* renderer, Mat4 projection) {
+    renderer->vertex_count = 0;
+    renderer->projection = projection;
 }
 
 // push sprites to GPU and issue draw call
-void renderer_flush(RenderBatch2d* batcher) {
-    if (batcher->vertex_count == 0) return;
+void renderer_flush(RenderBatch2d* renderer) {
+    if (renderer->vertex_count == 0) return;
 
     // append vertices to the buffer tape and retrieve the current byte offset
-    int offset = sg_append_buffer(batcher->vbuf, &(sg_range) {
-        .ptr = batcher->vertex_buffer,
-        .size = sizeof(Vertex) * batcher->vertex_count
+    int offset = sg_append_buffer(renderer->vbuf, &(sg_range) {
+        .ptr = renderer->vertex_buffer,
+        .size = sizeof(Vertex) * renderer->vertex_count
     });
 
     // handle potential frame allocation overflows safely
-    if (sg_query_buffer_overflow(batcher->vbuf)) {
-        batcher->vertex_count = 0;
+    if (sg_query_buffer_overflow(renderer->vbuf)) {
+        renderer->vertex_count = 0;
         return;
     }
 
     // bind the buffer and apply the dynamic offset
     sg_bindings bind = {
-        .vertex_buffers[0] = batcher->vbuf,
+        .vertex_buffers[0] = renderer->vbuf,
         .vertex_buffer_offsets[0] = offset, // Tracks where this batch begins
-        .index_buffer = batcher->ibuf
+        .index_buffer = renderer->ibuf,
+        .views[0] = renderer->current_texture_view,
+        .samplers[0] = renderer->default_sampler
     };
 
     // draw using index buffer layout
-    sg_apply_pipeline(batcher->pip);
+    sg_apply_pipeline(renderer->pip);
     sg_apply_bindings(&bind);
 
-    float aspect_data[4] = { sapp_width() / (float)sapp_height(), 0.0f, 0.0f, 0.0f };
-    sg_apply_uniforms(0, &SG_RANGE(aspect_data));
+    // apply projection
+    sg_apply_uniforms(0, &SG_RANGE(renderer->projection));
 
     // each quad has 6 indices.
     // vertex_count / 4 = numer of quads/sprites.
-    int num_indices = (batcher->vertex_count / 4) * 6;
+    int num_indices = (renderer->vertex_count / 4) * 6;
     sg_draw(0, num_indices, 1);
 
     // reset count for the next batch
-    batcher->vertex_count = 0;
+    renderer->vertex_count = 0;
 }
 
-void renderer_push_sprite(RenderBatch2d* batcher, Sprite* sprite) {
-    if (batcher->vertex_count + 4 > MAX_VERTICES) {
-        renderer_flush(batcher);
+void renderer_push_sprite(RenderBatch2d* renderer, Sprite* sprite) {
+    if (renderer->vertex_count + 4 > MAX_VERTICES) {
+        renderer_flush(renderer);
     }
 
-    int v_idx = batcher->vertex_count;
-    Rgba col = sprite->color;
+    // select texture (or default texture)
+    sg_view view = (sprite->texture_view.id != SG_INVALID_ID) ? sprite->texture_view : renderer->white_tex_view;
+
+    // if texture changes mid batch, flush the old before switching texture
+    // I don't really like this much....
+    if (renderer->vertex_count > 0 && renderer->current_texture_view.id != view.id) {
+        renderer_flush(renderer);
+    }
+    renderer->current_texture_view = view;
+
+    int v_idx = renderer->vertex_count;
+    sg_color col = sprite->color;
 
     float half_w = sprite->size.x * 0.5f;
     float half_h = sprite->size.y * 0.5f;
@@ -187,6 +362,13 @@ void renderer_push_sprite(RenderBatch2d* batcher, Sprite* sprite) {
         { -half_w,  half_h }, // Bottom-Left
         {  half_w,  half_h }, // Bottom-Right
         {  half_w, -half_h }  // Top-Right
+    };
+
+    Vec2 uv_corners[4] = {
+        { 0.0f, 0.0f }, // Top-Left
+        { 0.0f, 1.0f }, // Bottom-Left
+        { 1.0f, 1.0f }, // Bottom-Right
+        { 1.0f, 0.0f }  // Top-Right
     };
 
     float cos_a = sprite->rotation.x;
@@ -202,38 +384,46 @@ void renderer_push_sprite(RenderBatch2d* batcher, Sprite* sprite) {
         float ry = lx * sin_a + ly * cos_a;
 
         // Translate to world position
-        batcher->vertex_buffer[v_idx + i].position[0] = rx + sprite->position.x;
-        batcher->vertex_buffer[v_idx + i].position[1] = ry + sprite->position.y;
-        batcher->vertex_buffer[v_idx + i].position[2] = 0.0f; // 2D Z-layer
+        renderer->vertex_buffer[v_idx + i].position[0] = rx + sprite->position.x;
+        renderer->vertex_buffer[v_idx + i].position[1] = ry + sprite->position.y;
+        renderer->vertex_buffer[v_idx + i].position[2] = 0.0f; // 2D Z-layer
 
         // Apply color
-        batcher->vertex_buffer[v_idx + i].color[0] = col.r;
-        batcher->vertex_buffer[v_idx + i].color[1] = col.g;
-        batcher->vertex_buffer[v_idx + i].color[2] = col.b;
-        batcher->vertex_buffer[v_idx + i].color[3] = col.a;
+        renderer->vertex_buffer[v_idx + i].color[0] = col.r;
+        renderer->vertex_buffer[v_idx + i].color[1] = col.g;
+        renderer->vertex_buffer[v_idx + i].color[2] = col.b;
+        renderer->vertex_buffer[v_idx + i].color[3] = col.a;
+
+        // Add texture UV
+        renderer->vertex_buffer[v_idx + i].uv.x = uv_corners[i].x;
+        renderer->vertex_buffer[v_idx + i].uv.y = uv_corners[i].y;
     }
 
-    batcher->vertex_count += 4;
+    renderer->vertex_count += 4;
 }
 
-void renderer_end(RenderBatch2d* batcher) {
-    renderer_flush(batcher);
+void renderer_end(RenderBatch2d* renderer) {
+    renderer_flush(renderer);
 }
 
-void renderer_destroy(RenderBatch2d* batcher) {
-    // extra defensive code in case this is called after sokol is destoryed
+void renderer_destroy(RenderBatch2d* renderer) {
+    // extra defensive code in case this is called after sokol is destroyed
     if (!sg_isvalid()) return;
 
     // Safely release the GPU resources
-    sg_destroy_buffer(batcher->vbuf);
-    sg_destroy_buffer(batcher->ibuf);
-    sg_destroy_pipeline(batcher->pip);
+    sg_destroy_buffer(renderer->vbuf);
+    sg_destroy_buffer(renderer->ibuf);
+    sg_destroy_pipeline(renderer->pip);
+    sg_destroy_view(renderer->white_tex_view);
+    sg_destroy_image(renderer->white_image);
+    sg_destroy_sampler(renderer->default_sampler);
 
     // Clear handles to prevent accidental use-after-free
-    batcher->vbuf.id = 0;
-    batcher->ibuf.id = 0;
-    batcher->pip.id = 0;
-    batcher->vertex_count = 0;
+    renderer->vbuf.id = 0;
+    renderer->ibuf.id = 0;
+    renderer->pip.id = 0;
+    memset(renderer->vertex_buffer, 0, sizeof(Vertex) * MAX_VERTICES);
+    renderer->vertex_count = 0;
 }
 
 #endif // ENGINE_IMPL_GUARD
