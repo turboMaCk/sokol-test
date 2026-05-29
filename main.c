@@ -9,8 +9,8 @@
 #include "sokol_glue.h"
 #include "sokol_log.h"
 
-#define GAME_TARGET_WIDTH 1280.0f
-#define GAME_TARGET_HEIGHT 720.0f
+#define GAME_TARGET_WIDTH 320.0f
+#define GAME_TARGET_HEIGHT 180.0f
 #define GAME_ASPECT (GAME_TARGET_WIDTH / GAME_TARGET_HEIGHT)
 
 static RenderBatch2d renderer;
