@@ -93,32 +93,13 @@ void frame(void) {
         .color = {0.0f, 1.0f, 0.0f, 1.0f} // Green color
     };
 
-    float target_aspect = game_target.width / game_target.height;
-    float screen_aspect = screen_target.width / screen_target.height;
-
-    float draw_w;
-    float draw_h;
-
-    if (screen_aspect > target_aspect) {
-      // pillarbox
-      draw_h = screen_target.height;
-      draw_w = draw_h * target_aspect;
-    } else {
-      // letterbox
-      draw_w = screen_target.width;
-      draw_h = draw_w / target_aspect;
-    }
-
-    float x = (screen_target.width - draw_w) * 0.5f;
-    float y = (screen_target.height - draw_h) * 0.5f;
-
     Sprite editor_pane_rect = {
-        .position = { x + draw_w * 0.5f, y + draw_h * 0.5f },
-        .size = { draw_w, draw_h },
         .rotation = ROTATION_NONE,
         .color = {1,1,1,1},
         .texture_view = game_target.color_texture_view
     };
+
+    sprite_fit_to(&editor_pane_rect, &game_target, &screen_target);
 
     // -------------------------------------------------------------
     // PASS 1: GAMEPLAY LAYERS (Offscreen Target)
@@ -132,12 +113,12 @@ void frame(void) {
         renderer_end(&renderer);
 
         // Draw Game HUD Space (Green status bar anchored to virtual top-left)
-        Mat4 game_ui_proj = mat4_ortho(0.0f, game_target.width, game_target.height, 0.0f);
+        Mat4 game_ui_proj = mat4_ortho(0.0f, game_target.size.x, game_target.size.y, 0.0f);
         renderer_begin(&renderer, game_ui_proj);
         renderer_push_sprite(&renderer, &hud_sprite);
         renderer_end(&renderer);
     }
-    sg_end_pass();
+    renderer_end_target_pass(&game_target);
 
     // -------------------------------------------------------------
     // PASS 2: APP ENVIRONMENT LAYERS (Screen Target)
@@ -145,7 +126,7 @@ void frame(void) {
     renderer_begin_target_pass(&screen_target, (sg_color){ 0.1f, 0.1f, 0.1f, 1.0f });
     {
         // Draw Editor Panels / Clay Layout Viewports
-        Mat4 native_proj = mat4_ortho(0.0f, screen_target.width, screen_target.height, 0.0f);
+        Mat4 native_proj = mat4_ortho(0.0f, screen_target.size.x, screen_target.size.y, 0.0f);
         renderer_begin(&renderer, native_proj);
 
         // Draw our placeholder panel rect where the game texture will now clip in
@@ -153,7 +134,7 @@ void frame(void) {
 
         renderer_end(&renderer);
     }
-    sg_end_pass();
+    renderer_end_target_pass(&screen_target);
 
     sg_commit();
 }
@@ -166,8 +147,8 @@ void cleanup(void) {
 }
 
 sapp_desc sokol_main(int argc, char **argv) {
-    (void)argc; (void)argv
-    ;
+    (void)argc; (void)argv;
+
     sapp_desc desc = {
         .init_cb = init,
         .frame_cb = frame,

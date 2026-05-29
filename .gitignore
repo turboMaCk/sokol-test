@@ -1,5 +1,11 @@
-.cache
-.idea
-compile_commands.json
+# out
 game
+
+# IDE
 compile_commands.json
+.idea
+.cache
+
+# Nix & direnv
+/.direnv/
+/result

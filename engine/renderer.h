@@ -9,6 +9,7 @@
 
 // TODO: probably move to math module
 typedef struct { float x, y; } Vec2;
+typedef struct { int x, y; } Vec2i;
 typedef struct { float m[16]; } Mat4;
 
 Vec2 rotation_from_rad(float radians);
@@ -23,14 +24,16 @@ typedef struct {
     sg_view color_view;
     sg_view depth_view;
     sg_view color_texture_view;
-    float width;
-    float height;
+    Vec2i size;
     bool is_swapchain;
 } RenderTarget;
 
-RenderTarget render_target_create_offscreen(float width, float height);
+RenderTarget render_target_create_offscreen(int width, int height);
 RenderTarget render_target_create_swapchain(void);
 void render_target_destroy(RenderTarget *target);
+void renderer_begin_target_pass(RenderTarget* target, sg_color clear_color);
+void renderer_end_target_pass(RenderTarget* target);
+static inline float aspect_of(Vec2i rect);
 
 typedef struct {
     float position[3];
@@ -71,6 +74,7 @@ void renderer_flush(RenderBatch2d* renderer);
 void renderer_end(RenderBatch2d* renderer);
 void renderer_push_sprite(RenderBatch2d* renderer, Sprite* sprite);
 void renderer_destroy(RenderBatch2d* renderer);
+void sprite_fit_to(Sprite *sprite, RenderTarget *source, RenderTarget *target);
 
 #endif // RENDERER_H
 
@@ -120,16 +124,15 @@ Mat4 mat4_ortho(float left, float right, float bottom, float top) {
 // RenderTarget
 
 // Implementation functions
-RenderTarget render_target_create_offscreen(float width, float height) {
+RenderTarget render_target_create_offscreen(int width, int height) {
     RenderTarget target = {
-        .width = width,
-        .height = height,
+        .size = (Vec2i) {width, height},
         .is_swapchain = false
     };
 
     target.color_img = sg_make_image(&(sg_image_desc){
-        .width = (int)width,
-        .height = (int)height,
+        .width = width,
+        .height = height,
         .pixel_format = SG_PIXELFORMAT_RGBA8,
         .sample_count = 1,
         .usage = {
@@ -169,8 +172,7 @@ RenderTarget render_target_create_offscreen(float width, float height) {
 
 RenderTarget render_target_create_swapchain(void) {
     return (RenderTarget){
-        .width = 0.0f,  // Will be overwritten with actual window width on frame 1
-        .height = 0.0f, // Will be overwritten with actual window height on frame 1
+        .size = (Vec2i){0},   // Will be overwritten with actual window width on frame 1
         .is_swapchain = true
     };
 }
@@ -189,8 +191,8 @@ void renderer_begin_target_pass(RenderTarget* target, sg_color clear_color) {
         extern sg_swapchain sglue_swapchain(void);
 
         // Keep our internal engine tracking dimensions updated in case of resize
-        target->width = (float)sapp_width();
-        target->height = (float)sapp_height();
+        target->size.x = sapp_width();
+        target->size.y = sapp_height();
 
         // Let the glue library completely manage the swapchain population
         pass.swapchain = sglue_swapchain();
@@ -203,6 +205,10 @@ void renderer_begin_target_pass(RenderTarget* target, sg_color clear_color) {
     sg_begin_pass(&pass);
 }
 
+void renderer_end_target_pass(RenderTarget* target) {
+    sg_end_pass();
+}
+
 void render_target_destroy(RenderTarget *target) {
     if (target->is_swapchain) return;
     sg_destroy_image(target->color_img);
@@ -210,9 +216,12 @@ void render_target_destroy(RenderTarget *target) {
     sg_destroy_view(target->color_view);
     sg_destroy_view(target->depth_view);
     sg_destroy_view(target->color_texture_view);
-    target->width = 0;
-    target->height = 0;
+    target->size = (Vec2i){0};
     target->is_swapchain = true;
+}
+
+static inline float aspect_of(Vec2i rect) {
+    return (float)rect.x / (float)rect.y;
 }
 
 // Renderer
@@ -424,6 +433,31 @@ void renderer_destroy(RenderBatch2d* renderer) {
     renderer->pip.id = 0;
     memset(renderer->vertex_buffer, 0, sizeof(Vertex) * MAX_VERTICES);
     renderer->vertex_count = 0;
+}
+
+
+void sprite_fit_to(Sprite *sprite, RenderTarget *source, RenderTarget *target) {
+    float source_aspect = aspect_of(source->size);
+    float target_aspect = aspect_of(target->size);
+
+    float draw_w;
+    float draw_h;
+
+    if (target_aspect > source_aspect) {
+      // pillarbox
+      draw_h = target->size.y;
+      draw_w = draw_h * source_aspect;
+    } else {
+      // letterbox
+      draw_w = target->size.x;
+      draw_h = draw_w / source_aspect;
+    }
+
+    float x = (target->size.x - draw_w) * 0.5f;
+    float y = (target->size.y - draw_h) * 0.5f;
+
+    sprite->position = (Vec2){ x + draw_w * 0.5f, y + draw_h * 0.5f };
+    sprite->size = (Vec2){ draw_w, draw_h };
 }
 
 #endif // ENGINE_IMPL_GUARD
