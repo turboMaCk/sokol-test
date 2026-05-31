@@ -13,6 +13,9 @@
 #define GAME_TARGET_HEIGHT 180.0f
 #define GAME_ASPECT (GAME_TARGET_WIDTH / GAME_TARGET_HEIGHT)
 
+#define WIN_WIDTH 1280
+#define WIN_HEIGHT 720
+
 static RenderBatch2d renderer;
 static RenderTarget game_target;
 static RenderTarget screen_target;
@@ -153,8 +156,8 @@ sapp_desc sokol_main(int argc, char **argv) {
         .init_cb = init,
         .frame_cb = frame,
         .cleanup_cb = cleanup,
-        .width = 800,
-        .height = 600,
+        .width = WIN_WIDTH,
+        .height = WIN_HEIGHT,
         .window_title = "Sokol",
         .logger.func = slog_func
     };

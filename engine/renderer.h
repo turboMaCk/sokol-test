@@ -53,11 +53,14 @@ typedef struct {
     Mat4 projection;
 
     sg_image white_image;
-    sg_view white_tex_view;
-    sg_view current_texture_view;
 
     // The persistent sampler handle initialized once during setup
     sg_sampler default_sampler;
+
+    // TODO: these live in here temporarily
+    // they will be moved to sprite manager
+    sg_view white_tex_view;
+    sg_view current_texture_view;
 } RenderBatch2d;
 
 typedef struct {
@@ -353,8 +356,7 @@ void renderer_push_sprite(RenderBatch2d* renderer, Sprite* sprite) {
     // select texture (or default texture)
     sg_view view = (sprite->texture_view.id != SG_INVALID_ID) ? sprite->texture_view : renderer->white_tex_view;
 
-    // if texture changes mid batch, flush the old before switching texture
-    // I don't really like this much....
+    // TODO: this is here temporarily, it won't be necessary once sprite manager is introduced
     if (renderer->vertex_count > 0 && renderer->current_texture_view.id != view.id) {
         renderer_flush(renderer);
     }

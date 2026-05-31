@@ -6,7 +6,7 @@ pkgs.mkShell rec {
   buildInputs = with pkgs; [
     libGL
   ] ++ (with pkgs.xorg; [
-    libX11 libXi libXcursor libXrandr libXext libXext libXfixes
+    libx11 libxi libxcursor libxrandr libxext libxext libxfixes
   ]);
 
   shellHook = ''
