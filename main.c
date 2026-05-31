@@ -9,6 +9,8 @@
 #include "sokol_glue.h"
 #include "sokol_log.h"
 
+#include "shaders/sprite.h"
+
 #define GAME_TARGET_WIDTH 320.0f
 #define GAME_TARGET_HEIGHT 180.0f
 #define GAME_ASPECT (GAME_TARGET_WIDTH / GAME_TARGET_HEIGHT)
@@ -26,52 +28,7 @@ void init(void) {
         .logger.func = slog_func
     };
     sg_setup(&desc);
-
-    sg_shader_desc shader_desc = {
-        .uniform_blocks[0] = {
-            .stage = SG_SHADERSTAGE_VERTEX,
-            .size = sizeof(Mat4),
-            .glsl_uniforms[0] = {
-                .glsl_name = "u_projection",
-                .type = SG_UNIFORMTYPE_MAT4
-            }
-        },
-        .views[0].texture = {
-            .stage = SG_SHADERSTAGE_FRAGMENT,
-            .sample_type = SG_IMAGESAMPLETYPE_FLOAT
-        },
-        .samplers[0] = { .stage = SG_SHADERSTAGE_FRAGMENT },
-        .texture_sampler_pairs[0] = {
-            .stage = SG_SHADERSTAGE_FRAGMENT,
-            .glsl_name = "u_sampler",
-            .view_slot = 0,
-            .sampler_slot = 0
-        },
-
-        .vertex_func.source =
-            "#version 330 core\n"
-            "layout(location=0) in vec3 a_position;\n"
-            "layout(location=1) in vec4 a_color;\n"
-            "layout(location=2) in vec2 a_uv;\n"
-            "uniform mat4 u_projection;\n"
-            "out vec4 v_color;\n"
-            "out vec2 v_uv;\n"
-            "void main() {\n"
-            "  gl_Position = u_projection * vec4(a_position, 1.0);\n"
-            "  v_color = a_color;\n"
-            "  v_uv = a_uv;\n"
-            "}",
-        .fragment_func.source =
-            "#version 330 core\n"
-            "uniform sampler2D u_sampler;\n"
-            "in vec4 v_color;\n"
-            "in vec2 v_uv;\n"
-            "out vec4 f_color;\n"
-            "void main() {\n"
-            "  f_color = texture(u_sampler, v_uv) * v_color;\n"
-            "}"
-    };
-    sg_shader shader = sg_make_shader(&shader_desc);
+    sg_shader shader = sg_make_shader(sprite2d_shader_desc(sg_query_backend()));
 
     renderer_init(&renderer, shader);
 

@@ -1,5 +1,6 @@
 # out
 game
+shaders/*.h
 
 # IDE
 compile_commands.json
