@@ -38,11 +38,15 @@ void init(void) {
     screen_target = render_target_create_swapchain();
 }
 
+static float rotation = 45.0f;
+
 void frame(void) {
+    rotation+=1.0f;
+
     Sprite game_sprite = {
         .position = {0.0f, 0.0f},
         .size = {0.5f, 0.5f},
-        .rotation = rotation_from_deg(45.0f),
+        .rotation = rotation_from_deg(rotation),
         .color = {1.0f, 0.0f, 0.0f, 1.0f} // Red color
     };
 
