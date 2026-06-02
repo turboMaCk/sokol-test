@@ -6,6 +6,7 @@ shaders/*.h
 compile_commands.json
 .idea
 .cache
+.project.gf
 
 # Nix & direnv
 /.direnv/

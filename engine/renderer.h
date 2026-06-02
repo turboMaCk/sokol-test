@@ -33,9 +33,23 @@ Mat4 mat4_ortho(float left, float right, float bottom, float top);
 typedef struct {
     sg_image image;
     sg_view view;
-    int width;
-    int height;
+    sg_pixel_format format;
+    int pixel_size;
+    Vec2i size;
 } Texture;
+
+Texture texture_create_rgba(Vec2i size, void* data);
+Texture texture_create_r(Vec2i size, void* data);
+void texture_destroy(Texture* texture);
+void texture_update(Texture* texture, void* data);
+Texture texture_white_pixel(void);
+
+typedef struct {
+    sg_sampler sampler;
+} Sampler;
+
+Sampler sampler_create_default(void);
+void sampler_destroy(Sampler* sampler);
 
 typedef struct {
     sg_image color_img;
@@ -73,7 +87,7 @@ typedef struct {
 
     sg_image white_image;
 
-    // The persistent sampler handle initialized once during setup
+    // The persistent sampler initialized once during setup
     sg_sampler default_sampler;
 
     // TODO: these live in here temporarily
@@ -163,6 +177,86 @@ Mat4 mat4_ortho(float left, float right, float bottom, float top) {
     result.m[15] = 1.0f;
 
     return result;
+}
+
+// Texture
+
+static inline Texture texture_create(Vec2i size, void* data, sg_pixel_format format, int pixel_size) {
+  sg_image_desc img_desc = {
+      .width = size.x,
+      .height = size.y,
+      .pixel_format = format,
+      .usage = {
+        // TODO: for simplicity all textures will be updatable
+        // but it comes with some small runtime cost
+        // and might not be needed at all?
+          .dynamic_update = true
+      },
+    .data.mip_levels[0] = {
+        .ptr = data,
+        .size = size.x * size.y * pixel_size
+    }
+  };
+  sg_image image = sg_make_image(&img_desc);
+
+  sg_view_desc view_desc = {
+      .texture = {
+          .image = image
+      }
+  };
+
+  sg_view view = sg_make_view(&view_desc);
+
+  return (Texture) {
+      .image = image,
+      .view = view,
+      .format = format,
+      .pixel_size = pixel_size,
+      .size = size,
+  };
+}
+
+Texture texture_create_rgba(Vec2i size, void* data) {
+    return texture_create(size, data, SG_PIXELFORMAT_RGBA8, 4);
+}
+
+Texture texture_create_r8(Vec2i size, void* data) {
+    return texture_create(size, data, SG_PIXELFORMAT_R8, 1);
+}
+
+void texture_destroy(Texture* texture) {
+    sg_destroy_view(texture->view);
+    sg_destroy_image(texture->image);
+    memset(texture, 0, sizeof(*texture));
+}
+
+void texture_update(Texture* texture, void* data) {
+    sg_image_data img_data = {
+        .mip_levels[0] = {
+            .ptr = data,
+            .size = texture->size.x * texture->size.y * texture->pixel_size
+        }
+    };
+
+    sg_update_image(texture->image, &img_data);
+}
+
+Texture texture_white_pixel(void) {
+    static uint32_t white_pixel = 0xFFFFFFFF;
+    return texture_create_rgba((Vec2i){1,1}, &white_pixel);
+}
+
+// Sampler
+
+Sampler sampler_create_default(void) {
+    sg_sampler sampler = sg_make_sampler(&(sg_sampler_desc){ .label = "default-sampler" });
+
+    return (Sampler){sampler};
+}
+
+void sampler_destroy(Sampler* sampler) {
+    sg_destroy_sampler(sampler->sampler);
+    memset(sampler, 0, sizeof(Sampler));
 }
 
 // RenderTarget
