@@ -22,7 +22,12 @@ static RenderBatch2d renderer;
 static RenderTarget game_target;
 static RenderTarget screen_target;
 
+static Vec2 rotation = ROTATION_NONE;
+static Vec2 rotation_delta;
+
 void init(void) {
+    rotation_delta = rotation_from_deg(1.0f);
+
     sg_desc desc = {
         .environment = sglue_environment(),
         .logger.func = slog_func
@@ -38,15 +43,13 @@ void init(void) {
     screen_target = render_target_create_swapchain();
 }
 
-static float rotation = 45.0f;
-
 void frame(void) {
-    rotation+=1.0f;
+    rotation = rotation_mul(rotation, rotation_delta);
 
     Sprite game_sprite = {
         .position = {0.0f, 0.0f},
         .size = {0.5f, 0.5f},
-        .rotation = rotation_from_deg(rotation),
+        .rotation = rotation,
         .color = {1.0f, 0.0f, 0.0f, 1.0f} // Red color
     };
 

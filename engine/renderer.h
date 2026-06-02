@@ -11,12 +11,31 @@
 typedef struct { float x, y; } Vec2;
 typedef struct { int x, y; } Vec2i;
 typedef struct { float m[16]; } Mat4;
+Vec2 vec2_normalize(Vec2 v);
 
 Vec2 rotation_from_rad(float radians);
 Vec2 rotation_from_deg(float degrees);
+Vec2 rotation_mul(Vec2 a, Vec2 b);
+Vec2 rotation_inverse(Vec2 r);
 Mat4 mat4_ortho(float left, float right, float bottom, float top);
 
 #define ROTATION_NONE ((Vec2){ 1.0f, 0.0f })
+
+#define ROTATION_45        ((Vec2){  0.70710678f,  0.70710678f })
+#define ROTATION_NEG_45    ((Vec2){  0.70710678f, -0.70710678f })
+
+#define ROTATION_90        ((Vec2){  0.0f,  1.0f })
+#define ROTATION_NEG_90    ((Vec2){  0.0f, -1.0f })
+
+#define ROTATION_180       ((Vec2){ -1.0f,  0.0f })
+#define ROTATION_NEG_180   ((Vec2){ -1.0f,  0.0f })
+
+typedef struct {
+    sg_image image;
+    sg_view view;
+    int width;
+    int height;
+} Texture;
 
 typedef struct {
     sg_image color_img;
@@ -92,6 +111,16 @@ void sprite_fit_to(Sprite *sprite, RenderTarget *source, RenderTarget *target);
 
 // Math
 
+
+Vec2 vec2_normalize(Vec2 v) {
+    float len = sqrtf(v.x * v.x + v.y * v.y);
+    if (len == 0.0f) return (Vec2){0};
+    return (Vec2) {
+        .x = v.x / len,
+        .y = v.y / len,
+    };
+}
+
 Vec2 rotation_from_rad(float radians) {
     Vec2 rot;
     rot.x = cosf(radians);
@@ -104,6 +133,18 @@ Vec2 rotation_from_deg(float degrees) {
     // Using 0.0174532925f (PI / 180) avoids a runtime division
     float radians = degrees * 0.0174532925f;
     return rotation_from_rad(radians);
+}
+
+// Multiplication of 2 complex numbers is like angle addition
+Vec2 rotation_mul(Vec2 a, Vec2 b) {
+    return (Vec2){
+        .x = a.x * b.x - a.y * b.y,
+        .y = a.y * b.x + a.x * b.y
+    };
+}
+
+Vec2 rotation_inverse(Vec2 r) {
+    return (Vec2) {r.x, -r.y};
 }
 
 Mat4 mat4_ortho(float left, float right, float bottom, float top) {
