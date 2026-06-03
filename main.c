@@ -25,9 +25,11 @@ static RenderBatch2d renderer;
 static RenderTarget game_target;
 static RenderTarget screen_target;
 
+static TextureAtlas orc_atlas;
+
 static Rot2d rotation = ROTATION_NONE;
 static Rot2d rotation_delta;
-static TextureAtlas orc_atlas;
+static Vec2 p_pos = {0};
 
 void init(void) {
     sg_desc desc = {
@@ -37,22 +39,30 @@ void init(void) {
     sg_setup(&desc);
     sg_shader shader = sg_make_shader(sprite2d_shader_desc(sg_query_backend()));
 
+    // renderer
     renderer_init(&renderer, shader);
 
-    // Both point to the same texture canvas
+    // render targets
     game_target = render_target_create_offscreen(GAME_TARGET_WIDTH, GAME_TARGET_HEIGHT);
-
     screen_target = render_target_create_swapchain();
 
-    rotation_delta = rotation_from_deg(1.0f);
-
+    // texture atlas
     Texture orc_texture = texture_load_png("./resources/orc.png");
     assert(texture_valid(&orc_texture));
     orc_atlas = texture_atlas_from_texture(orc_texture);
+
+    // game stuff
+    rotation_delta = rotation_from_deg(1.0f);
+    p_pos = (Vec2){(float)game_target.size.x/2, (float)game_target.size.y};
 }
 
 void frame(void) {
+    // projections
+    Mat4 game_proj = mat4_ortho(0, game_target.size.x, 0, game_target.size.y);
+    Mat4 native_proj = mat4_ortho(0.0f, screen_target.size.x, screen_target.size.y, 0.0f);
+
     rotation = rotation_mul(rotation, rotation_delta);
+    p_pos.y-= .5;
 
     Vec2 center = vec2_div(vec2i_to_vec2(game_target.size), 2);
 
@@ -64,7 +74,7 @@ void frame(void) {
     };
 
     Sprite orc_sprite = {
-        .position = center,
+        .position = p_pos,
         .size = {28, 28},
         .rotation = ROTATION_NONE,
         .image = sprite_image_from_texture_region(&orc_atlas.texture, (Vec2i){41,37}, (Vec2i){28,28}),
@@ -91,7 +101,6 @@ void frame(void) {
     // -------------------------------------------------------------
     renderer_begin_target_pass(&game_target, (sg_color){ 0.2f, 0.3f, 0.4f, 1.0f });
     {
-        Mat4 game_proj = mat4_ortho(0, game_target.size.x, 0, game_target.size.y);
         renderer_begin(&renderer, game_proj);
         {
           renderer_push_sprite(&renderer, &game_sprite);
@@ -112,11 +121,12 @@ void frame(void) {
     renderer_begin_target_pass(&screen_target, (sg_color){ 0.1f, 0.1f, 0.1f, 1.0f });
     {
         // Draw Editor Panels / Clay Layout Viewports
-        Mat4 native_proj = mat4_ortho(0.0f, screen_target.size.x, screen_target.size.y, 0.0f);
         renderer_begin(&renderer, native_proj);
 
         // Draw our placeholder panel rect where the game texture will now clip in
-        renderer_push_sprite(&renderer, &editor_pane_rect);
+        {
+            renderer_push_sprite(&renderer, &editor_pane_rect);
+        }
 
         renderer_end(&renderer);
     }
