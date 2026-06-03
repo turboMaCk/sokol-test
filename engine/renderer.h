@@ -30,11 +30,21 @@ Mat4 mat4_ortho(float left, float right, float bottom, float top);
 #define ROTATION_180       ((Vec2){ -1.0f,  0.0f })
 #define ROTATION_NEG_180   ((Vec2){ -1.0f,  0.0f })
 
+// layout: [ kind:3 | size:5 ]
+#define PIXEL_SIZE_BITS 5
+#define PIXEL_SIZE_MASK ((1u<<PIXEL_SIZE_BITS)-1)
+
+typedef enum uint8_t {
+    PixelFormatUnknown = 0,
+    PixelFormatRgba = (1u << PIXEL_SIZE_BITS) | 4u, // kind 1, size 4
+    PixelFormatRgb  = (2u << PIXEL_SIZE_BITS) | 3u, // kind 2, size 3
+    PixelFormatR    = (3u << PIXEL_SIZE_BITS) | 1u, // kind 3, size 1
+} PixelFormat;
+
 typedef struct {
     sg_image image;
     sg_view view;
-    sg_pixel_format format;
-    int pixel_size;
+    PixelFormat pixel_format;
     Vec2i size;
 } Texture;
 
@@ -181,47 +191,60 @@ Mat4 mat4_ortho(float left, float right, float bottom, float top) {
 
 // Texture
 
-static inline Texture texture_create(Vec2i size, void* data, sg_pixel_format format, int pixel_size) {
-  sg_image_desc img_desc = {
-      .width = size.x,
-      .height = size.y,
-      .pixel_format = format,
-      .usage = {
-        // TODO: for simplicity all textures will be updatable
-        // but it comes with some small runtime cost
-        // and might not be needed at all?
-          .dynamic_update = true
-      },
-    .data.mip_levels[0] = {
-        .ptr = data,
-        .size = size.x * size.y * pixel_size
+static inline uint8_t pixel_size(PixelFormat pf) {
+    return (uint8_t)pf & PIXEL_SIZE_MASK;
+}
+
+static inline sg_pixel_format pixel_format_to_sg(PixelFormat pf) {
+    switch(pf) {
+    case PixelFormatUnknown: return SG_PIXELFORMAT_NONE;
+    case PixelFormatRgba:    return SG_PIXELFORMAT_RGBA8;
+    case PixelFormatRgb:     return SG_PIXELFORMAT_SRGB8A8;
+    case PixelFormatR:       return SG_PIXELFORMAT_R8;
+    default:                 return SG_PIXELFORMAT_NONE;
     }
-  };
-  sg_image image = sg_make_image(&img_desc);
+}
 
-  sg_view_desc view_desc = {
-      .texture = {
-          .image = image
-      }
-  };
+static inline Texture texture_create(Vec2i size, void* data, PixelFormat format) {
+    sg_image_desc img_desc = {
+        .width = size.x,
+        .height = size.y,
+        .pixel_format = pixel_format_to_sg(format),
+        .usage = {
+            // TODO: for simplicity all textures will be updatable
+            // but it comes with some small runtime cost
+            // and might not be needed at all?
+            .dynamic_update = true
+        },
+        .data.mip_levels[0] = {
+            .ptr = data,
+            .size = size.x * size.y * pixel_size(format),
+        }
+    };
+    sg_image image = sg_make_image(&img_desc);
 
-  sg_view view = sg_make_view(&view_desc);
+    sg_view_desc view_desc = {
+        .texture = {
+            .image = image
+        }
+    };
 
-  return (Texture) {
-      .image = image,
-      .view = view,
-      .format = format,
-      .pixel_size = pixel_size,
-      .size = size,
-  };
+    sg_view view = sg_make_view(&view_desc);
+
+    return (Texture) {
+        .image = image,
+        .view = view,
+        .pixel_format = format,
+        .size = size,
+    };
 }
 
 Texture texture_create_rgba(Vec2i size, void* data) {
-    return texture_create(size, data, SG_PIXELFORMAT_RGBA8, 4);
+    return texture_create(size, data, PixelFormatRgba);
 }
 
-Texture texture_create_r8(Vec2i size, void* data) {
-    return texture_create(size, data, SG_PIXELFORMAT_R8, 1);
+Texture texture_create_r(Vec2i size, void* data) {
+    return texture_create(size, data, PixelFormatR);
 }
 
 void texture_destroy(Texture* texture) {
@@ -234,7 +257,7 @@ void texture_update(Texture* texture, void* data) {
     sg_image_data img_data = {
         .mip_levels[0] = {
             .ptr = data,
-            .size = texture->size.x * texture->size.y * texture->pixel_size
+            .size = texture->size.x * texture->size.y * pixel_size(texture->pixel_format)
         }
     };
 
