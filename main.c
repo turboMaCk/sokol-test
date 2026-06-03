@@ -1,6 +1,9 @@
 #define ENGINE_IMPL
 #include "engine/renderer.h"
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
 #define SOKOL_IMPL
 #define SOKOL_GLCORE33
 
@@ -24,10 +27,9 @@ static RenderTarget screen_target;
 
 static Rot2d rotation = ROTATION_NONE;
 static Rot2d rotation_delta;
+static TextureAtlas orc_atlas;
 
 void init(void) {
-    rotation_delta = rotation_from_deg(1.0f);
-
     sg_desc desc = {
         .environment = sglue_environment(),
         .logger.func = slog_func
@@ -41,22 +43,38 @@ void init(void) {
     game_target = render_target_create_offscreen(GAME_TARGET_WIDTH, GAME_TARGET_HEIGHT);
 
     screen_target = render_target_create_swapchain();
+
+    rotation_delta = rotation_from_deg(1.0f);
+
+    Texture orc_texture = texture_load_png("./resources/orc.png");
+    assert(texture_valid(&orc_texture));
+    orc_atlas = texture_atlas_from_texture(orc_texture);
 }
 
 void frame(void) {
     rotation = rotation_mul(rotation, rotation_delta);
 
+    Vec2 center = vec2_div(vec2i_to_vec2(game_target.size), 2);
+
     Sprite game_sprite = {
-        .position = {0.0f, 0.0f},
-        .size = {0.5f, 0.5f},
+        .position = center,
+        .size = {100, 100},
         .rotation = rotation,
-        .color = {1.0f, 0.0f, 0.0f, 1.0f} // Red color
+        .color = {1.0f, 0.0f, 0.0f, 1.0f}, // Red color
+    };
+
+    Sprite orc_sprite = {
+        .position = center,
+        .size = {28, 28},
+        .rotation = ROTATION_NONE,
+        .image = sprite_image_from_texture_region(&orc_atlas.texture, (Vec2i){41,37}, (Vec2i){28,28}),
+        .color = {1,1,1,1},
     };
 
     Sprite hud_sprite = {
-        .position = {20.0f, 20.0f},       // 20 pixels in from top-left of the game canvas
-        .size = {300.0f, 40.0f},          // A long health-bar style rectangle
-        .rotation = rotation_from_deg(0.0f),
+        .position = {(float)game_target.size.x/2, 0},       // 20 pixels in from top-left of the game canvas
+        .size = {(float)game_target.size.x, 28},          // A long health-bar style rectangle
+        .rotation = ROTATION_NONE,
         .color = {0.0f, 1.0f, 0.0f, 1.0f} // Green color
     };
 
@@ -73,16 +91,17 @@ void frame(void) {
     // -------------------------------------------------------------
     renderer_begin_target_pass(&game_target, (sg_color){ 0.2f, 0.3f, 0.4f, 1.0f });
     {
-        // Draw World Space (Red rotating box in the middle)
-        Mat4 game_proj = mat4_ortho(-GAME_ASPECT, GAME_ASPECT, -1.0f, 1.0f);
+        Mat4 game_proj = mat4_ortho(0, game_target.size.x, 0, game_target.size.y);
         renderer_begin(&renderer, game_proj);
-        renderer_push_sprite(&renderer, &game_sprite);
+        {
+          renderer_push_sprite(&renderer, &game_sprite);
+          renderer_push_sprite(&renderer, &orc_sprite);
+        }
         renderer_end(&renderer);
 
-        // Draw Game HUD Space (Green status bar anchored to virtual top-left)
-        Mat4 game_ui_proj = mat4_ortho(0.0f, game_target.size.x, game_target.size.y, 0.0f);
-        renderer_begin(&renderer, game_ui_proj);
-        renderer_push_sprite(&renderer, &hud_sprite);
+        renderer_begin(&renderer, game_proj); {
+            renderer_push_sprite(&renderer, &hud_sprite);
+        }
         renderer_end(&renderer);
     }
     renderer_end_target_pass(&game_target);

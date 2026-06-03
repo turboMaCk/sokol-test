@@ -32,7 +32,7 @@ static inline Rot2d rotation_mul(Rot2d a, Rot2d b);
 static inline Rot2d rotation_inverse(Rot2d r);
 
 typedef struct { float m[16]; } Mat4;
-Mat4 mat4_ortho(float left, float right, float bottom, float top);
+Mat4 mat4_ortho(float left, float right, float top, float bottom);
 
 #define ROTATION_NONE ((Rot2d){ 1.0f, 0.0f })
 
@@ -48,6 +48,8 @@ Mat4 mat4_ortho(float left, float right, float bottom, float top);
 // layout: [ kind:3 | size:5 ]
 #define PIXEL_SIZE_BITS 5
 #define PIXEL_SIZE_MASK ((1u<<PIXEL_SIZE_BITS)-1)
+
+// Texture
 
 typedef enum {
     PixelFormatUnknown = 0,
@@ -66,7 +68,21 @@ Texture texture_create_rgba(Vec2i size, void* data);
 Texture texture_create_r(Vec2i size, void* data);
 void texture_destroy(Texture* texture);
 void texture_update(Texture* texture, void* data);
-Texture* texture_white_pixel(void);
+Texture texture_load_png(const char* path);
+bool texture_valid(Texture* texture);
+static Texture* texture_white_pixel(void);
+
+typedef struct {
+    Texture texture;
+} TextureAtlas;
+
+// forward declared
+typedef struct SpriteImage SpriteImage;
+
+TextureAtlas texture_atlas_from_texture(Texture texture);
+SpriteImage texture_atlas_region(TextureAtlas* atlas, Vec2i position, Vec2i size);
+
+// Renderer
 
 typedef struct {
     sg_sampler sampler;
@@ -123,11 +139,11 @@ typedef struct {
     sg_view current_texture_view;
 } RenderBatch2d;
 
-typedef struct {
+struct SpriteImage {
     sg_view texture_view;
     Vec2 uv_start;
     Vec2 uv_end;
-} SpriteImage;
+};
 
 SpriteImage sprite_image_from_texture(Texture* texture);
 SpriteImage sprite_image_from_texture_region(Texture* texture, Vec2i position, Vec2i size);
@@ -159,6 +175,7 @@ void sprite_fit_to(Sprite* sprite, RenderTarget* source, RenderTarget* target);
 #include <string.h>
 #include <math.h>
 #include "sokol_app.h"
+#include "stb_image.h"
 
 // Math
 
@@ -277,7 +294,7 @@ static inline Rot2d rotation_inverse(Rot2d r) {
     };
 }
 
-Mat4 mat4_ortho(float left, float right, float bottom, float top) {
+Mat4 mat4_ortho(float left, float right, float top, float bottom) {
     Mat4 result = {0};
 
     // Near/Far are mapped tightly to [-1.0, 1.0] for 2D depth layers
@@ -369,7 +386,28 @@ void texture_update(Texture* texture, void* data) {
     sg_update_image(texture->image, &img_data);
 }
 
-Texture* texture_white_pixel(void) {
+
+Texture texture_load_png(const char* path) {
+    int width, height, channels;
+
+    unsigned char* pixels = stbi_load(path, &width, &height, &channels, 4 /* RGBA */);
+
+    if (!pixels) {
+        // TODO: should we crash hard?
+        return (Texture){0};
+    }
+
+    Texture texture = texture_create_rgba((Vec2i){width, height}, pixels);
+    stbi_image_free(pixels);
+
+    return texture;
+}
+
+bool texture_valid(Texture* texture) {
+    return texture && sg_query_image_state(texture->image) == SG_RESOURCESTATE_VALID;
+}
+
+static Texture* texture_white_pixel(void) {
     static uint32_t white_pixel_data = 0xFFFFFFFF;
     static Texture white_pixel;
     static bool white_pixel_initialized = false;
@@ -382,7 +420,15 @@ Texture* texture_white_pixel(void) {
     return &white_pixel;
 }
 
-// Sampler
+TextureAtlas texture_atlas_from_texture(Texture texture) {
+    return (TextureAtlas) { texture };
+}
+
+SpriteImage texture_atlas_region(TextureAtlas* atlas, Vec2i position, Vec2i size) {
+    return sprite_image_from_texture_region(&atlas->texture, position, size);
+}
+
+// Renderer
 
 Sampler sampler_create_default(void) {
     sg_sampler sampler = sg_make_sampler(&(sg_sampler_desc){ .label = "default-sampler" });
@@ -397,7 +443,6 @@ void sampler_destroy(Sampler* sampler) {
 
 // RenderTarget
 
-// Implementation functions
 RenderTarget render_target_create_offscreen(int width, int height) {
     RenderTarget target = {
         .kind = RenderTargetOffscreen,
@@ -501,8 +546,6 @@ static inline float aspect_of(Vec2i rect) {
     return (float)rect.x / (float)rect.y;
 }
 
-// Renderer
-
 SpriteImage sprite_image_from_texture(Texture* texture) {
     return (SpriteImage) {
         .texture_view = texture->view,
@@ -576,13 +619,22 @@ void renderer_init(RenderBatch2d* renderer, sg_shader shader) {
     // pipeline
     sg_pipeline_desc pip_desc = {
         // location 0: pos
-        .layout.attrs[0] = { .format = SG_VERTEXFORMAT_FLOAT3 },
+        .layout.attrs[0] = {.format = SG_VERTEXFORMAT_FLOAT3},
         // location 1: color
-        .layout.attrs[1] = { .format = SG_VERTEXFORMAT_FLOAT4 },
+        .layout.attrs[1] = {.format = SG_VERTEXFORMAT_FLOAT4},
         // location 2: UV
-        .layout.attrs[2] = { .format = SG_VERTEXFORMAT_FLOAT2 },
+        .layout.attrs[2] = {.format = SG_VERTEXFORMAT_FLOAT2},
         .index_type = SG_INDEXTYPE_UINT16,
-        .shader = shader
+        .shader = shader,
+        .colors[0] = {
+            .blend = {
+                .enabled = true,
+                .src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA,
+                .dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
+                .src_factor_alpha = SG_BLENDFACTOR_ONE,
+                .dst_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
+            },
+        },
     };
 
     renderer->pip = sg_make_pipeline(&pip_desc);
@@ -664,10 +716,10 @@ void renderer_push_sprite(RenderBatch2d* renderer, Sprite* sprite) {
     };
 
     Vec2 uv_corners[4] = {
-        { 0.0f, 0.0f }, // Top-Left
-        { 0.0f, 1.0f }, // Bottom-Left
-        { 1.0f, 1.0f }, // Bottom-Right
-        { 1.0f, 0.0f }  // Top-Right
+        { sprite->image.uv_start.x, sprite->image.uv_start.y },
+        { sprite->image.uv_start.x, sprite->image.uv_end.y   },
+        { sprite->image.uv_end.x,   sprite->image.uv_end.y   },
+        { sprite->image.uv_end.x,   sprite->image.uv_start.y }
     };
 
     float cos_a = sprite->rotation.cos;
