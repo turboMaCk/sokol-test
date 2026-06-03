@@ -1,6 +1,8 @@
 # out
 game
 shaders/*.h
+*.a
+*.o
 
 # IDE
 compile_commands.json

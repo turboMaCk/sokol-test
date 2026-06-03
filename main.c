@@ -1,11 +1,9 @@
+#include <assert.h>
+
 #define ENGINE_IMPL
 #include "engine/renderer.h"
 #include "shaders/sprite.h"
 
-#define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
-
-#define SOKOL_IMPL
 #define SOKOL_GLCORE33
 #include "sokol_app.h"
 #include "sokol_gfx.h"

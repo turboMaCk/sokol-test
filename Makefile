@@ -8,12 +8,15 @@ C_FLAGS := -DSOKOL_GLCORE -Wall -I$(PWD)/include -lm -g $(PLATFORM_C_FLAGS)
 .PHONY: all
 all: game
 
-game: main.c $(wildcard include/*.h) $(wildcard engine/*.h) $(SHADERS_H)
-	$(CC) $(C_FLAGS) main.c -o $(GAME_OUT)
+vendor.o: $(wildcard include/*.h) vendor.c
+	$(CC) $(C_FLAGS) -c vendor.c -o $@
+
+$(GAME_OUT): main.c vendor.o $(wildcard engine/*.h) $(SHADERS_H)
+	$(CC) $(C_FLAGS) main.c vendor.o -o $@
 
 shaders/%.h: shaders/%.glsl Makefile
 	sokol-shdc --input  $< --output $@ --slang glsl430
 
 .PHONY: clean
 clean:
-	$(RM) $(GAME_OUT) $(SHADERS_H)
+	$(RM) $(GAME_OUT) $(SHADERS_H) vendor.o
