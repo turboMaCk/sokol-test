@@ -18,12 +18,13 @@ static inline Vec2 vec2_mul_vec2(Vec2 a, Vec2 b);
 static inline Vec2 vec2_div_vec2(Vec2 a, Vec2 b);
 static inline Vec2 vec2_min(Vec2 a, Vec2 b);
 static inline Vec2 vec2_max(Vec2 a, Vec2 b);
+static inline Vec2 vec2_lerp(Vec2 a, Vec2 b, float t);
 
 typedef struct { int x, y; } Vec2i;
+static inline Vec2 vec2i_to_vec2(Vec2i v);
 static inline Vec2i vec2i_add(Vec2i a, Vec2i b);
 static inline Vec2i vec2i_sub(Vec2i a, Vec2i b);
 
-static inline Vec2 vec2i_to_vec2(Vec2i v);
 
 typedef struct { float cos, sin; } Rot2d;
 static inline Rot2d rotation_from_rad(float radians);
@@ -32,6 +33,7 @@ static inline Rot2d rotation_mul(Rot2d a, Rot2d b);
 static inline Rot2d rotation_inverse(Rot2d r);
 
 typedef struct { float m[16]; } Mat4;
+Mat4 mat4_mul(Mat4 a, Mat4 b);
 Mat4 mat4_ortho(float left, float right, float top, float bottom);
 
 #define ROTATION_NONE ((Rot2d){ 1.0f, 0.0f })
@@ -48,6 +50,24 @@ Mat4 mat4_ortho(float left, float right, float top, float bottom);
 // layout: [ kind:3 | size:5 ]
 #define PIXEL_SIZE_BITS 5
 #define PIXEL_SIZE_MASK ((1u<<PIXEL_SIZE_BITS)-1)
+
+// Camera
+
+typedef struct {
+    Vec2 position;
+    float zoom;
+
+    // shake
+    float shake_strength;   // max offset in pixels
+    float shake_decay;      // how fast it fades
+    float shake_time;       // internal timer
+} Camera2d;
+
+static inline Camera2d camera2d_default(void);
+Mat4 camera2d_view_proj(Camera2d cam, Vec2i target_size);
+void camera2d_shake(Camera2d* cam, float strength);
+void camera2d_update(Camera2d* cam, float dt);
+
 
 // Texture
 
@@ -180,28 +200,28 @@ void sprite_fit_to(Sprite* sprite, RenderTarget* source, RenderTarget* target);
 // Math
 
 static inline Vec2 vec2_add(Vec2 a, Vec2 b) {
-    return (Vec2){
+    return (Vec2) {
         .x = a.x + b.x,
         .y = a.y + b.y,
     };
 }
 
 static inline Vec2 vec2_sub(Vec2 a, Vec2 b) {
-    return (Vec2){
+    return (Vec2) {
         .x = a.x - b.x,
         .y = a.y - b.y,
     };
 }
 
 static inline Vec2 vec2_mul(Vec2 v, float s) {
-    return (Vec2){
+    return (Vec2) {
         .x = v.x * s,
         .y = v.y * s,
     };
 }
 
 static inline Vec2 vec2_div(Vec2 v, float s) {
-    return (Vec2){
+    return (Vec2) {
         .x = v.x / s,
         .y = v.y / s,
     };
@@ -229,14 +249,14 @@ static inline Vec2 vec2_div_vec2(Vec2 a, Vec2 b) {
 }
 
 static inline Vec2 vec2_min(Vec2 a, Vec2 b) {
-    return (Vec2){
+    return (Vec2) {
         .x = (a.x < b.x) ? a.x : b.x,
         .y = (a.y < b.y) ? a.y : b.y,
     };
 }
 
 static inline Vec2 vec2_max(Vec2 a, Vec2 b) {
-    return (Vec2){
+    return (Vec2) {
         .x = (a.x > b.x) ? a.x : b.x,
         .y = (a.y > b.y) ? a.y : b.y,
     };
@@ -248,6 +268,13 @@ static inline Vec2 vec2_normalize(Vec2 v) {
     return (Vec2) {
         .x = v.x / len,
         .y = v.y / len,
+    };
+}
+
+static inline Vec2 vec2_lerp(Vec2 a, Vec2 b, float t) {
+    return (Vec2) {
+        .x = a.x + (b.x + a.x) * t,
+        .y = a.y + (b.y - a.y) * t,
     };
 }
 
@@ -274,7 +301,7 @@ Rot2d rotation_from_rad(float radians) {
 
 static inline Rot2d rotation_from_deg(float degrees) {
     // Convert degrees to radians: (deg * PI / 180)
-    // Using 0.0174532925f (PI / 180) avoids a runtime division
+// Using 0.0174532925f (PI / 180) avoids a runtime division
     float radians = degrees * 0.0174532925f;
     return rotation_from_rad(radians);
 }
@@ -310,6 +337,99 @@ Mat4 mat4_ortho(float left, float right, float top, float bottom) {
     result.m[15] = 1.0f;
 
     return result;
+}
+
+Mat4 mat4_mul(Mat4 a, Mat4 b) {
+    Mat4 res = {0};
+
+    for (int row = 0; row < 4; row++) {
+        for (int col = 0; col < 4; col++) {
+            res.m[col + row * 4] =
+                a.m[0 + row * 4] * b.m[col + 0 * 4] +
+                a.m[1 + row * 4] * b.m[col + 1 * 4] +
+                a.m[2 + row * 4] * b.m[col + 2 * 4] +
+                a.m[3 + row * 4] * b.m[col + 3 * 4];
+        }
+    }
+
+    return res;
+}
+
+// Camera
+
+static inline Camera2d camera2d_default(void) {
+    return (Camera2d) {
+        .position = {0,0},
+        .zoom = 1.0f,
+        .shake_strength = 0.0f,
+        .shake_decay = 5.0f,
+        .shake_time = 0.0f,
+    };
+}
+
+static inline Vec2 camera2d_get_shake_offset(Camera2d* cam) {
+    if (cam->shake_strength <= 0.0f) {
+        return (Vec2){0,0};
+    }
+
+    // simple deterministic noise based on time
+    float t = cam->shake_time * 60.0f;
+
+    float x = sinf(t * 12.9898f) * 43758.5453f;
+    float y = sinf(t * 78.233f)  * 12345.6789f;
+
+    float nx = (x - floorf(x)) * 2.0f - 1.0f;
+    float ny = (y - floorf(y)) * 2.0f - 1.0f;
+
+    return (Vec2){
+        .x = nx * cam->shake_strength,
+        .y = ny * cam->shake_strength
+    };
+}
+
+Mat4 camera2d_view_proj(Camera2d cam, Vec2i target_size) {
+    float w = (float)target_size.x;
+    float h = (float)target_size.y;
+
+    // 0,0 in top left corner
+    Mat4 proj = mat4_ortho(0, w, 0, h);
+
+    // shake
+    Vec2 shake = camera2d_get_shake_offset(&cam);
+
+    // zoom
+    float sx = cam.zoom;
+    float sy = cam.zoom;
+
+    Mat4 view = {0};
+    view.m[0] = sx;
+    view.m[5] = sy;
+    view.m[10] = 1.0f;
+    view.m[15] = 1.0f;
+
+    // move world opossite to the camera position
+    view.m[12] = -(cam.position.x + shake.x) * sx;
+    view.m[13] = -(cam.position.y - shake.y) * sy;
+
+    return mat4_mul(proj, view);
+}
+
+void camera2d_shake(Camera2d* cam, float strength) {
+    if (strength > cam->shake_strength) {
+        cam->shake_strength = strength;
+    }
+    cam->shake_time = 0.0f;
+}
+
+void camera2d_update(Camera2d* cam, float dt) {
+    cam->shake_time += dt;
+
+    // exponential decay
+    cam->shake_strength *= expf(-cam->shake_decay * dt);
+
+    if (cam->shake_decay < 0.01f) {
+        cam->shake_strength = 0.0f;
+    }
 }
 
 // Texture

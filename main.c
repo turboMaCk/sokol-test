@@ -1,18 +1,17 @@
 #define ENGINE_IMPL
 #include "engine/renderer.h"
+#include "shaders/sprite.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
 #define SOKOL_IMPL
 #define SOKOL_GLCORE33
-
 #include "sokol_app.h"
 #include "sokol_gfx.h"
 #include "sokol_glue.h"
 #include "sokol_log.h"
-
-#include "shaders/sprite.h"
+#include "sokol_time.h"
 
 #define GAME_TARGET_WIDTH 320.0f
 #define GAME_TARGET_HEIGHT 180.0f
@@ -31,12 +30,19 @@ static Rot2d rotation = ROTATION_NONE;
 static Rot2d rotation_delta;
 static Vec2 p_pos = {0};
 
+static Camera2d game_cam;
+
+double last_time = 0.0;
+
 void init(void) {
+    // sokol init
     sg_desc desc = {
         .environment = sglue_environment(),
         .logger.func = slog_func
     };
     sg_setup(&desc);
+    stm_setup(); // setup time tracking
+
     sg_shader shader = sg_make_shader(sprite2d_shader_desc(sg_query_backend()));
 
     // renderer
@@ -51,18 +57,25 @@ void init(void) {
     assert(texture_valid(&orc_texture));
     orc_atlas = texture_atlas_from_texture(orc_texture);
 
+    // camera
+    game_cam = camera2d_default();
+    camera2d_shake(&game_cam, 0.1f);
+
     // game stuff
     rotation_delta = rotation_from_deg(1.0f);
     p_pos = (Vec2){(float)game_target.size.x/2, (float)game_target.size.y};
 }
 
 void frame(void) {
-    // projections
-    Mat4 game_proj = mat4_ortho(0, game_target.size.x, 0, game_target.size.y);
-    Mat4 native_proj = mat4_ortho(0.0f, screen_target.size.x, screen_target.size.y, 0.0f);
+    // keep track of timing
+    double now = stm_sec(stm_now());
+    double dt = now - last_time;
+    last_time = now;
 
     rotation = rotation_mul(rotation, rotation_delta);
-    p_pos.y-= .5;
+    p_pos.y-= 1;
+    /* game_cam.position.x += 0.01; */
+    camera2d_update(&game_cam, dt);
 
     Vec2 center = vec2_div(vec2i_to_vec2(game_target.size), 2);
 
@@ -82,10 +95,10 @@ void frame(void) {
     };
 
     Sprite hud_sprite = {
-        .position = {(float)game_target.size.x/2, 0},       // 20 pixels in from top-left of the game canvas
-        .size = {(float)game_target.size.x, 28},          // A long health-bar style rectangle
+        .position = {(float)game_target.size.x/2, 0}, // 20 pixels in from top-left of the game canvas
+        .size = {(float)game_target.size.x, 28},      // A long health-bar style rectangle
         .rotation = ROTATION_NONE,
-        .color = {0.0f, 1.0f, 0.0f, 1.0f} // Green color
+        .color = {0.0f, 1.0f, 0.0f, 1.0f}             // Green color
     };
 
     Sprite editor_pane_rect = {
@@ -99,8 +112,10 @@ void frame(void) {
     // -------------------------------------------------------------
     // PASS 1: GAMEPLAY LAYERS (Offscreen Target)
     // -------------------------------------------------------------
+
     renderer_begin_target_pass(&game_target, (sg_color){ 0.2f, 0.3f, 0.4f, 1.0f });
     {
+        Mat4 game_proj = camera2d_view_proj(game_cam, game_target.size);
         renderer_begin(&renderer, game_proj);
         {
           renderer_push_sprite(&renderer, &game_sprite);
@@ -108,7 +123,8 @@ void frame(void) {
         }
         renderer_end(&renderer);
 
-        renderer_begin(&renderer, game_proj); {
+        Mat4 game_ui_proj = mat4_ortho(0, game_target.size.x, 0, game_target.size.y);
+        renderer_begin(&renderer, game_ui_proj); {
             renderer_push_sprite(&renderer, &hud_sprite);
         }
         renderer_end(&renderer);
@@ -121,6 +137,7 @@ void frame(void) {
     renderer_begin_target_pass(&screen_target, (sg_color){ 0.1f, 0.1f, 0.1f, 1.0f });
     {
         // Draw Editor Panels / Clay Layout Viewports
+        Mat4 native_proj = mat4_ortho(0.0f, screen_target.size.x, screen_target.size.y, 0.0f);
         renderer_begin(&renderer, native_proj);
 
         // Draw our placeholder panel rect where the game texture will now clip in
