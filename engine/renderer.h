@@ -9,36 +9,50 @@
 
 // TODO: probably move to math module
 typedef struct { float x, y; } Vec2;
-typedef struct { int x, y; } Vec2i;
-typedef struct { float m[16]; } Mat4;
-Vec2 vec2_normalize(Vec2 v);
+static inline Vec2 vec2_add(Vec2 a, Vec2 b);
+static inline Vec2 vec2_sub(Vec2 a, Vec2 b);
+static inline Vec2 vec2_mul(Vec2 v, float s);
+static inline Vec2 vec2_div(Vec2 v, float s);
+static inline Vec2 vec2_normalize(Vec2 v);
+static inline Vec2 vec2_mul_vec2(Vec2 a, Vec2 b);
+static inline Vec2 vec2_div_vec2(Vec2 a, Vec2 b);
+static inline Vec2 vec2_min(Vec2 a, Vec2 b);
+static inline Vec2 vec2_max(Vec2 a, Vec2 b);
 
-Vec2 rotation_from_rad(float radians);
-Vec2 rotation_from_deg(float degrees);
-Vec2 rotation_mul(Vec2 a, Vec2 b);
-Vec2 rotation_inverse(Vec2 r);
+typedef struct { int x, y; } Vec2i;
+static inline Vec2i vec2i_add(Vec2i a, Vec2i b);
+static inline Vec2i vec2i_sub(Vec2i a, Vec2i b);
+
+static inline Vec2 vec2i_to_vec2(Vec2i v);
+
+typedef struct { float cos, sin; } Rot2d;
+static inline Rot2d rotation_from_rad(float radians);
+static inline Rot2d rotation_from_deg(float degrees);
+static inline Rot2d rotation_mul(Rot2d a, Rot2d b);
+static inline Rot2d rotation_inverse(Rot2d r);
+
+typedef struct { float m[16]; } Mat4;
 Mat4 mat4_ortho(float left, float right, float bottom, float top);
 
-#define ROTATION_NONE ((Vec2){ 1.0f, 0.0f })
+#define ROTATION_NONE ((Rot2d){ 1.0f, 0.0f })
 
-#define ROTATION_45        ((Vec2){  0.70710678f,  0.70710678f })
-#define ROTATION_NEG_45    ((Vec2){  0.70710678f, -0.70710678f })
+#define ROTATION_45        ((Rot2d){  0.70710678f,  0.70710678f })
+#define ROTATION_NEG_45    ((Rot2d){  0.70710678f, -0.70710678f })
 
-#define ROTATION_90        ((Vec2){  0.0f,  1.0f })
-#define ROTATION_NEG_90    ((Vec2){  0.0f, -1.0f })
+#define ROTATION_90        ((Rot2d){  0.0f,  1.0f })
+#define ROTATION_NEG_90    ((Rot2d){  0.0f, -1.0f })
 
-#define ROTATION_180       ((Vec2){ -1.0f,  0.0f })
-#define ROTATION_NEG_180   ((Vec2){ -1.0f,  0.0f })
+#define ROTATION_180       ((Rot2d){ -1.0f,  0.0f })
+#define ROTATION_NEG_180   ((Rot2d){ -1.0f,  0.0f })
 
 // layout: [ kind:3 | size:5 ]
 #define PIXEL_SIZE_BITS 5
 #define PIXEL_SIZE_MASK ((1u<<PIXEL_SIZE_BITS)-1)
 
-typedef enum uint8_t {
+typedef enum {
     PixelFormatUnknown = 0,
     PixelFormatRgba = (1u << PIXEL_SIZE_BITS) | 4u, // kind 1, size 4
-    PixelFormatRgb  = (2u << PIXEL_SIZE_BITS) | 3u, // kind 2, size 3
-    PixelFormatR    = (3u << PIXEL_SIZE_BITS) | 1u, // kind 3, size 1
+    PixelFormatR8   = (2u << PIXEL_SIZE_BITS) | 1u, // kind 3, size 1
 } PixelFormat;
 
 typedef struct {
@@ -52,7 +66,7 @@ Texture texture_create_rgba(Vec2i size, void* data);
 Texture texture_create_r(Vec2i size, void* data);
 void texture_destroy(Texture* texture);
 void texture_update(Texture* texture, void* data);
-Texture texture_white_pixel(void);
+Texture* texture_white_pixel(void);
 
 typedef struct {
     sg_sampler sampler;
@@ -61,14 +75,20 @@ typedef struct {
 Sampler sampler_create_default(void);
 void sampler_destroy(Sampler* sampler);
 
+typedef enum {
+    RenderTargetOffscreen = 0, // default value
+    RenderTargetSwapchain = 1,
+} RenderTargetKind;
+
 typedef struct {
+    RenderTargetKind kind;
+    Vec2i size;
+    // only off screen render target defines these
     sg_image color_img;
     sg_image depth_img;
     sg_view color_view;
     sg_view depth_view;
     sg_view color_texture_view;
-    Vec2i size;
-    bool is_swapchain;
 } RenderTarget;
 
 RenderTarget render_target_create_offscreen(int width, int height);
@@ -95,23 +115,30 @@ typedef struct {
     // current projection, applied during renderer_begin()
     Mat4 projection;
 
-    sg_image white_image;
-
     // The persistent sampler initialized once during setup
     sg_sampler default_sampler;
 
     // TODO: these live in here temporarily
     // they will be moved to sprite manager
-    sg_view white_tex_view;
     sg_view current_texture_view;
 } RenderBatch2d;
 
 typedef struct {
+    sg_view texture_view;
+    Vec2 uv_start;
+    Vec2 uv_end;
+} SpriteImage;
+
+SpriteImage sprite_image_from_texture(Texture* texture);
+SpriteImage sprite_image_from_texture_region(Texture* texture, Vec2i position, Vec2i size);
+SpriteImage sprite_image_from_render_target(RenderTarget* render_target);
+
+typedef struct {
     Vec2 position;
     Vec2 size;
-    Vec2 rotation; // Stores { cos(angle), sin(angle) }
+    Rot2d rotation;
     sg_color color;
-    sg_view texture_view;
+    SpriteImage image;
 } Sprite;
 
 void renderer_init(RenderBatch2d* renderer, sg_shader shader);
@@ -120,7 +147,7 @@ void renderer_flush(RenderBatch2d* renderer);
 void renderer_end(RenderBatch2d* renderer);
 void renderer_push_sprite(RenderBatch2d* renderer, Sprite* sprite);
 void renderer_destroy(RenderBatch2d* renderer);
-void sprite_fit_to(Sprite *sprite, RenderTarget *source, RenderTarget *target);
+void sprite_fit_to(Sprite* sprite, RenderTarget* source, RenderTarget* target);
 
 #endif // RENDERER_H
 
@@ -135,8 +162,70 @@ void sprite_fit_to(Sprite *sprite, RenderTarget *source, RenderTarget *target);
 
 // Math
 
+static inline Vec2 vec2_add(Vec2 a, Vec2 b) {
+    return (Vec2){
+        .x = a.x + b.x,
+        .y = a.y + b.y,
+    };
+}
 
-Vec2 vec2_normalize(Vec2 v) {
+static inline Vec2 vec2_sub(Vec2 a, Vec2 b) {
+    return (Vec2){
+        .x = a.x - b.x,
+        .y = a.y - b.y,
+    };
+}
+
+static inline Vec2 vec2_mul(Vec2 v, float s) {
+    return (Vec2){
+        .x = v.x * s,
+        .y = v.y * s,
+    };
+}
+
+static inline Vec2 vec2_div(Vec2 v, float s) {
+    return (Vec2){
+        .x = v.x / s,
+        .y = v.y / s,
+    };
+}
+
+static inline Vec2 vec2i_to_vec2(Vec2i v) {
+    return (Vec2){
+        .x = (float)v.x,
+        .y = (float)v.y,
+    };
+}
+
+static inline Vec2 vec2_mul_vec2(Vec2 a, Vec2 b) {
+    return (Vec2){
+        .x = a.x * b.x,
+        .y = a.y * b.y,
+    };
+}
+
+static inline Vec2 vec2_div_vec2(Vec2 a, Vec2 b) {
+    return (Vec2){
+        .x = a.x / b.x,
+        .y = a.y / b.y,
+    };
+}
+
+static inline Vec2 vec2_min(Vec2 a, Vec2 b) {
+    return (Vec2){
+        .x = (a.x < b.x) ? a.x : b.x,
+        .y = (a.y < b.y) ? a.y : b.y,
+    };
+}
+
+static inline Vec2 vec2_max(Vec2 a, Vec2 b) {
+    return (Vec2){
+        .x = (a.x > b.x) ? a.x : b.x,
+        .y = (a.y > b.y) ? a.y : b.y,
+    };
+}
+
+static inline Vec2 vec2_normalize(Vec2 v) {
     float len = sqrtf(v.x * v.x + v.y * v.y);
     if (len == 0.0f) return (Vec2){0};
     return (Vec2) {
@@ -145,14 +234,28 @@ Vec2 vec2_normalize(Vec2 v) {
     };
 }
 
-Vec2 rotation_from_rad(float radians) {
-    Vec2 rot;
-    rot.x = cosf(radians);
-    rot.y = sinf(radians);
-    return rot;
+static inline Vec2i vec2i_add(Vec2i a, Vec2i b) {
+    return (Vec2i){
+        .x = a.x + b.x,
+        .y = a.y + b.y,
+    };
 }
 
-Vec2 rotation_from_deg(float degrees) {
+static inline Vec2i vec2i_sub(Vec2i a, Vec2i b) {
+    return (Vec2i){
+        .x = a.x - b.x,
+        .y = a.y - b.y,
+    };
+}
+
+Rot2d rotation_from_rad(float radians) {
+    return (Rot2d) {
+        .cos = cosf(radians),
+        .sin = sinf(radians),
+    };
+}
+
+static inline Rot2d rotation_from_deg(float degrees) {
     // Convert degrees to radians: (deg * PI / 180)
     // Using 0.0174532925f (PI / 180) avoids a runtime division
     float radians = degrees * 0.0174532925f;
@@ -160,15 +263,18 @@ Vec2 rotation_from_deg(float degrees) {
 }
 
 // Multiplication of 2 complex numbers is like angle addition
-Vec2 rotation_mul(Vec2 a, Vec2 b) {
-    return (Vec2){
-        .x = a.x * b.x - a.y * b.y,
-        .y = a.y * b.x + a.x * b.y
+static inline Rot2d rotation_mul(Rot2d a, Rot2d b) {
+    return (Rot2d){
+        .cos = a.cos * b.cos - a.sin * b.sin,
+        .sin = a.sin * b.cos + a.cos * b.sin,
     };
 }
 
-Vec2 rotation_inverse(Vec2 r) {
-    return (Vec2) {r.x, -r.y};
+static inline Rot2d rotation_inverse(Rot2d r) {
+    return (Rot2d) {
+        .cos = r.cos,
+        .sin = -r.sin
+    };
 }
 
 Mat4 mat4_ortho(float left, float right, float bottom, float top) {
@@ -199,8 +305,7 @@ static inline sg_pixel_format pixel_format_to_sg(PixelFormat pf) {
     switch(pf) {
     case PixelFormatUnknown: return SG_PIXELFORMAT_NONE;
     case PixelFormatRgba:    return SG_PIXELFORMAT_RGBA8;
-    case PixelFormatRgb:     return SG_PIXELFORMAT_SRGB8A8;
-    case PixelFormatR:       return SG_PIXELFORMAT_R8;
+    case PixelFormatR8:      return SG_PIXELFORMAT_R8;
     default:                 return SG_PIXELFORMAT_NONE;
     }
 }
@@ -216,10 +321,6 @@ static inline Texture texture_create(Vec2i size, void* data, PixelFormat format)
             // and might not be needed at all?
             .dynamic_update = true
         },
-        .data.mip_levels[0] = {
-            .ptr = data,
-            .size = size.x * size.y * pixel_size(format),
-        }
     };
     sg_image image = sg_make_image(&img_desc);
 
@@ -231,12 +332,16 @@ static inline Texture texture_create(Vec2i size, void* data, PixelFormat format)
 
     sg_view view = sg_make_view(&view_desc);
 
-    return (Texture) {
+    Texture texture = (Texture) {
         .image = image,
         .view = view,
         .pixel_format = format,
         .size = size,
     };
+
+    texture_update(&texture, data);
+
+    return texture;
 }
 
 Texture texture_create_rgba(Vec2i size, void* data) {
@@ -244,7 +349,7 @@ Texture texture_create_rgba(Vec2i size, void* data) {
 }
 
 Texture texture_create_r(Vec2i size, void* data) {
-    return texture_create(size, data, PixelFormatR);
+    return texture_create(size, data, PixelFormatR8);
 }
 
 void texture_destroy(Texture* texture) {
@@ -264,9 +369,17 @@ void texture_update(Texture* texture, void* data) {
     sg_update_image(texture->image, &img_data);
 }
 
-Texture texture_white_pixel(void) {
-    static uint32_t white_pixel = 0xFFFFFFFF;
-    return texture_create_rgba((Vec2i){1,1}, &white_pixel);
+Texture* texture_white_pixel(void) {
+    static uint32_t white_pixel_data = 0xFFFFFFFF;
+    static Texture white_pixel;
+    static bool white_pixel_initialized = false;
+
+    if (!white_pixel_initialized) {
+        white_pixel = texture_create_rgba((Vec2i){1,1}, &white_pixel_data);
+        white_pixel_initialized = true;
+    }
+
+    return &white_pixel;
 }
 
 // Sampler
@@ -287,8 +400,8 @@ void sampler_destroy(Sampler* sampler) {
 // Implementation functions
 RenderTarget render_target_create_offscreen(int width, int height) {
     RenderTarget target = {
+        .kind = RenderTargetOffscreen,
         .size = (Vec2i) {width, height},
-        .is_swapchain = false
     };
 
     target.color_img = sg_make_image(&(sg_image_desc){
@@ -332,9 +445,9 @@ RenderTarget render_target_create_offscreen(int width, int height) {
 }
 
 RenderTarget render_target_create_swapchain(void) {
-    return (RenderTarget){
+    return (RenderTarget) {
+        .kind = RenderTargetSwapchain,
         .size = (Vec2i){0},   // Will be overwritten with actual window width on frame 1
-        .is_swapchain = true
     };
 }
 
@@ -348,7 +461,8 @@ void renderer_begin_target_pass(RenderTarget* target, sg_color clear_color) {
 
     sg_pass pass = { .action = action };
 
-    if (target->is_swapchain) {
+    switch (target->kind) {
+    case RenderTargetSwapchain: {
         extern sg_swapchain sglue_swapchain(void);
 
         // Keep our internal engine tracking dimensions updated in case of resize
@@ -357,10 +471,12 @@ void renderer_begin_target_pass(RenderTarget* target, sg_color clear_color) {
 
         // Let the glue library completely manage the swapchain population
         pass.swapchain = sglue_swapchain();
-    } else {
+    } break;
+    case RenderTargetOffscreen: {
         // Direct view assignments for offscreen rendering
         pass.attachments.colors[0] = target->color_view;
         pass.attachments.depth_stencil = target->depth_view;
+    } break;
     }
 
     sg_begin_pass(&pass);
@@ -371,14 +487,14 @@ void renderer_end_target_pass(RenderTarget* target) {
 }
 
 void render_target_destroy(RenderTarget *target) {
-    if (target->is_swapchain) return;
+    if (target->kind == RenderTargetSwapchain) return;
     sg_destroy_image(target->color_img);
     sg_destroy_image(target->depth_img);
     sg_destroy_view(target->color_view);
     sg_destroy_view(target->depth_view);
     sg_destroy_view(target->color_texture_view);
     target->size = (Vec2i){0};
-    target->is_swapchain = true;
+    target->kind = RenderTargetSwapchain;
 }
 
 static inline float aspect_of(Vec2i rect) {
@@ -386,6 +502,35 @@ static inline float aspect_of(Vec2i rect) {
 }
 
 // Renderer
+
+SpriteImage sprite_image_from_texture(Texture* texture) {
+    return (SpriteImage) {
+        .texture_view = texture->view,
+        .uv_start = (Vec2){0,0},
+        .uv_end = (Vec2){1,1},
+    };
+}
+
+SpriteImage sprite_image_from_texture_region(Texture* texture, Vec2i position, Vec2i size) {
+    Vec2 tex_size = vec2i_to_vec2(texture->size);
+
+    return (SpriteImage){
+        .texture_view = texture->view,
+        .uv_start = vec2_div_vec2(vec2i_to_vec2(position), tex_size),
+        .uv_end = vec2_div_vec2(
+            vec2i_to_vec2(vec2i_add(position, size)),
+            tex_size
+        ),
+    };
+}
+
+SpriteImage sprite_image_from_render_target(RenderTarget* render_target) {
+    return (SpriteImage){
+        .texture_view = render_target->color_texture_view,
+        .uv_start = (Vec2){0,0},
+        .uv_end = (Vec2){1,1},
+    };
+}
 
 void renderer_init(RenderBatch2d* renderer, sg_shader shader) {
     memset(renderer, 0, sizeof(RenderBatch2d));
@@ -442,21 +587,6 @@ void renderer_init(RenderBatch2d* renderer, sg_shader shader) {
 
     renderer->pip = sg_make_pipeline(&pip_desc);
 
-    // default white texture (solid colors)
-    static uint32_t white_pixel = 0xFFFFFFFF; // RGBA8 white (declared static so memory stays persistent during setup)
-    renderer->white_image = sg_make_image(&(sg_image_desc){
-        .width = 1,
-        .height = 1,
-        .pixel_format = SG_PIXELFORMAT_RGBA8,
-        .sample_count = 1,
-        .data.mip_levels[0] = SG_RANGE(white_pixel)
-    });
-
-    renderer->white_tex_view = sg_make_view(&(sg_view_desc){
-        .texture.image = renderer->white_image,
-        .label = "white-texture-view"
-    });
-
     renderer->default_sampler = sg_make_sampler(&(sg_sampler_desc){ .label = "default-sampler" });
 }
 
@@ -512,7 +642,7 @@ void renderer_push_sprite(RenderBatch2d* renderer, Sprite* sprite) {
     }
 
     // select texture (or default texture)
-    sg_view view = (sprite->texture_view.id != SG_INVALID_ID) ? sprite->texture_view : renderer->white_tex_view;
+    sg_view view = sprite->image.texture_view.id != SG_INVALID_ID ? sprite->image.texture_view : texture_white_pixel()->view;
 
     // TODO: this is here temporarily, it won't be necessary once sprite manager is introduced
     if (renderer->vertex_count > 0 && renderer->current_texture_view.id != view.id) {
@@ -540,8 +670,8 @@ void renderer_push_sprite(RenderBatch2d* renderer, Sprite* sprite) {
         { 1.0f, 0.0f }  // Top-Right
     };
 
-    float cos_a = sprite->rotation.x;
-    float sin_a = sprite->rotation.y;
+    float cos_a = sprite->rotation.cos;
+    float sin_a = sprite->rotation.sin;
 
     // Rotate + Translate
     for (int i = 0; i < 4; i++) {
@@ -583,8 +713,6 @@ void renderer_destroy(RenderBatch2d* renderer) {
     sg_destroy_buffer(renderer->vbuf);
     sg_destroy_buffer(renderer->ibuf);
     sg_destroy_pipeline(renderer->pip);
-    sg_destroy_view(renderer->white_tex_view);
-    sg_destroy_image(renderer->white_image);
     sg_destroy_sampler(renderer->default_sampler);
 
     // Clear handles to prevent accidental use-after-free

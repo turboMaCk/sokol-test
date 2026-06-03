@@ -22,8 +22,8 @@ static RenderBatch2d renderer;
 static RenderTarget game_target;
 static RenderTarget screen_target;
 
-static Vec2 rotation = ROTATION_NONE;
-static Vec2 rotation_delta;
+static Rot2d rotation = ROTATION_NONE;
+static Rot2d rotation_delta;
 
 void init(void) {
     rotation_delta = rotation_from_deg(1.0f);
@@ -63,7 +63,7 @@ void frame(void) {
     Sprite editor_pane_rect = {
         .rotation = ROTATION_NONE,
         .color = {1,1,1,1},
-        .texture_view = game_target.color_texture_view
+        .image = sprite_image_from_render_target(&game_target),
     };
 
     sprite_fit_to(&editor_pane_rect, &game_target, &screen_target);
