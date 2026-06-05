@@ -316,4 +316,3 @@ SOKOL_API_IMPL double stm_ns(uint64_t ticks) {
     return (double)ticks;
 }
 #endif /* SOKOL_TIME_IMPL */
-

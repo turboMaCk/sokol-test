@@ -1,3 +1,9 @@
+// fix sokol_time when -std=c99 on Linux
+#ifdef __linux__
+    #define _POSIX_C_SOURCE 199309L
+    #include <time.h>
+#endif
+
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
