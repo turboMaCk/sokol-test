@@ -32,6 +32,8 @@ static inline Rot2d rotation_from_deg(float degrees);
 static inline Rot2d rotation_mul(Rot2d a, Rot2d b);
 static inline Rot2d rotation_inverse(Rot2d r);
 
+// Note we're using column major matrixes
+// to be consistent with OpenGL
 typedef struct { float m[16]; } Mat4;
 Mat4 mat4_mul(Mat4 a, Mat4 b);
 Mat4 mat4_ortho(float left, float right, float top, float bottom);
@@ -56,6 +58,7 @@ Mat4 mat4_ortho(float left, float right, float top, float bottom);
 typedef struct {
     Vec2 position;
     float zoom;
+    float follow_speed;
 
     // shake
     float shake_strength;   // max offset in pixels
@@ -67,6 +70,7 @@ static inline Camera2d camera2d_default(void);
 Mat4 camera2d_view_proj(Camera2d cam, Vec2i target_size);
 void camera2d_shake(Camera2d* cam, float strength);
 void camera2d_update(Camera2d* cam, float dt);
+void camera2d_follow(Camera2d* cam, Vec2 position, float dt);
 
 
 // Texture
@@ -273,7 +277,7 @@ static inline Vec2 vec2_normalize(Vec2 v) {
 
 static inline Vec2 vec2_lerp(Vec2 a, Vec2 b, float t) {
     return (Vec2) {
-        .x = a.x + (b.x + a.x) * t,
+        .x = a.x + (b.x - a.x) * t,
         .y = a.y + (b.y - a.y) * t,
     };
 }
@@ -340,19 +344,19 @@ Mat4 mat4_ortho(float left, float right, float top, float bottom) {
 }
 
 Mat4 mat4_mul(Mat4 a, Mat4 b) {
-    Mat4 res = {0};
+    Mat4 r = {0};
 
-    for (int row = 0; row < 4; row++) {
-        for (int col = 0; col < 4; col++) {
-            res.m[col + row * 4] =
-                a.m[0 + row * 4] * b.m[col + 0 * 4] +
-                a.m[1 + row * 4] * b.m[col + 1 * 4] +
-                a.m[2 + row * 4] * b.m[col + 2 * 4] +
-                a.m[3 + row * 4] * b.m[col + 3 * 4];
+    for (int col = 0; col < 4; col++) {
+        for (int row = 0; row < 4; row++) {
+            r.m[col * 4 + row] =
+                a.m[0 * 4 + row] * b.m[col * 4 + 0] +
+                a.m[1 * 4 + row] * b.m[col * 4 + 1] +
+                a.m[2 * 4 + row] * b.m[col * 4 + 2] +
+                a.m[3 * 4 + row] * b.m[col * 4 + 3];
         }
     }
 
-    return res;
+    return r;
 }
 
 // Camera
@@ -361,6 +365,7 @@ static inline Camera2d camera2d_default(void) {
     return (Camera2d) {
         .position = {0,0},
         .zoom = 1.0f,
+        .follow_speed = 10.0f,
         .shake_strength = 0.0f,
         .shake_decay = 5.0f,
         .shake_time = 0.0f,
@@ -401,6 +406,8 @@ Mat4 camera2d_view_proj(Camera2d cam, Vec2i target_size) {
     float sx = cam.zoom;
     float sy = cam.zoom;
 
+    // could use identity constructior
+    // and set just 0 and 5
     Mat4 view = {0};
     view.m[0] = sx;
     view.m[5] = sy;
@@ -408,12 +415,13 @@ Mat4 camera2d_view_proj(Camera2d cam, Vec2i target_size) {
     view.m[15] = 1.0f;
 
     // move world opossite to the camera position
-    view.m[12] = -(cam.position.x + shake.x) * sx;
-    view.m[13] = -(cam.position.y - shake.y) * sy;
+    view.m[12] = -(cam.position.x + shake.x) * sx + target_size.x * 0.5;
+    view.m[13] = -(cam.position.y - shake.y) * sy + target_size.y * 0.5;
 
     return mat4_mul(proj, view);
 }
 
+// strength is in pixels
 void camera2d_shake(Camera2d* cam, float strength) {
     if (strength > cam->shake_strength) {
         cam->shake_strength = strength;
@@ -430,6 +438,11 @@ void camera2d_update(Camera2d* cam, float dt) {
     if (cam->shake_decay < 0.01f) {
         cam->shake_strength = 0.0f;
     }
+}
+
+void camera2d_follow(Camera2d* cam, Vec2 target, float dt) {
+    float t = 1.0f - expf(-cam->follow_speed * dt);
+    cam->position = vec2_lerp(cam->position, target, t);
 }
 
 // Texture

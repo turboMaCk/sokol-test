@@ -1,15 +1,14 @@
 #include <assert.h>
 
-#define ENGINE_IMPL
-#include "engine/renderer.h"
-#include "shaders/sprite.h"
-
-#define SOKOL_GLCORE33
 #include "sokol_app.h"
 #include "sokol_gfx.h"
 #include "sokol_glue.h"
 #include "sokol_log.h"
 #include "sokol_time.h"
+
+#define ENGINE_IMPL
+#include "engine/renderer.h"
+#include "shaders/sprite.h"
 
 #define GAME_TARGET_WIDTH 320.0f
 #define GAME_TARGET_HEIGHT 180.0f
@@ -17,6 +16,8 @@
 
 #define WIN_WIDTH 1280
 #define WIN_HEIGHT 720
+
+#define clamp(a, max) (a > max ? max : a)
 
 static RenderBatch2d renderer;
 static RenderTarget game_target;
@@ -30,7 +31,7 @@ static Vec2 p_pos = {0};
 
 static Camera2d game_cam;
 
-double last_time = 0.0;
+uint64_t last_time;
 
 void init(void) {
     // sokol init
@@ -40,6 +41,7 @@ void init(void) {
     };
     sg_setup(&desc);
     stm_setup(); // setup time tracking
+    last_time = stm_now();
 
     sg_shader shader = sg_make_shader(sprite2d_shader_desc(sg_query_backend()));
 
@@ -57,28 +59,27 @@ void init(void) {
 
     // camera
     game_cam = camera2d_default();
-    camera2d_shake(&game_cam, 0.1f);
+    game_cam.position.y = -GAME_TARGET_HEIGHT;
+    camera2d_shake(&game_cam, 10.0f);
 
     // game stuff
-    rotation_delta = rotation_from_deg(1.0f);
-    p_pos = (Vec2){(float)game_target.size.x/2, (float)game_target.size.y};
+    p_pos = (Vec2){0,0};
 }
 
 void frame(void) {
     // keep track of timing
-    double now = stm_sec(stm_now());
-    double dt = now - last_time;
+    uint64_t now = stm_now();
+    // clamp to prevent large time deltas (e.g. when debugging with breakpoints)
+    double dt = clamp(stm_sec(stm_diff(now, last_time)), 0.1);
     last_time = now;
 
-    rotation = rotation_mul(rotation, rotation_delta);
-    p_pos.y-= 1;
-    /* game_cam.position.x += 0.01; */
+    camera2d_follow(&game_cam, p_pos, dt);
     camera2d_update(&game_cam, dt);
 
-    Vec2 center = vec2_div(vec2i_to_vec2(game_target.size), 2);
-
+    rotation_delta = rotation_from_deg(1.0f);
+    rotation = rotation_mul(rotation, rotation_delta);
     Sprite game_sprite = {
-        .position = center,
+        .position = {0,0},
         .size = {100, 100},
         .rotation = rotation,
         .color = {1.0f, 0.0f, 0.0f, 1.0f}, // Red color
@@ -110,7 +111,6 @@ void frame(void) {
     // -------------------------------------------------------------
     // PASS 1: GAMEPLAY LAYERS (Offscreen Target)
     // -------------------------------------------------------------
-
     renderer_begin_target_pass(&game_target, (sg_color){ 0.2f, 0.3f, 0.4f, 1.0f });
     {
         Mat4 game_proj = camera2d_view_proj(game_cam, game_target.size);
