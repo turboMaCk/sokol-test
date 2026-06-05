@@ -52,7 +52,7 @@ Mat4 mat4_ortho(float left, float right, float top, float bottom);
 #if defined(ENGINE_IMPL) || defined(__CLANGD__)
 
 #ifndef ENGINE_LA_MATH_IMPL_GUARD
-#define ENGINE_LA_MATH_IMPL_IMPL_GUARD
+#define ENGINE_LA_MATH_IMPL_GUARD
 
 static inline Vec2 vec2_add(Vec2 a, Vec2 b) {
     return (Vec2) {
@@ -156,7 +156,7 @@ Rot2d rotation_from_rad(float radians) {
 
 static inline Rot2d rotation_from_deg(float degrees) {
     // Convert degrees to radians: (deg * PI / 180)
-// Using 0.0174532925f (PI / 180) avoids a runtime division
+    // Using 0.0174532925f (PI / 180) avoids a runtime division
     float radians = degrees * 0.0174532925f;
     return rotation_from_rad(radians);
 }

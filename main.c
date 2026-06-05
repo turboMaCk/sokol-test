@@ -127,7 +127,7 @@ void frame(void) {
         }
         renderer_end(&renderer);
     }
-    renderer_end_target_pass(&game_target);
+    renderer_end_target_pass();
 
     // -------------------------------------------------------------
     // PASS 2: APP ENVIRONMENT LAYERS (Screen Target)
@@ -145,7 +145,7 @@ void frame(void) {
 
         renderer_end(&renderer);
     }
-    renderer_end_target_pass(&screen_target);
+    renderer_end_target_pass();
 
     sg_commit();
 }
